@@ -10,7 +10,7 @@
     
     <a class="navbar-brand me-2" href="../index.html">AlphaSimR</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.4.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2</small>
 
     
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -75,6 +75,7 @@
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co">#Set simulation parameters</span></span></span>
 <span class="r-in"><span><span class="va">SP</span> <span class="op">=</span> <span class="va"><a href="SimParam.html">SimParam</a></span><span class="op">$</span><span class="fu">new</span><span class="op">(</span><span class="va">founderPop</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">SP</span><span class="op">$</span><span class="va">nThreads</span> <span class="op">=</span> <span class="fl">1L</span></span></span>
 <span class="r-in"><span><span class="va">SP</span><span class="op">$</span><span class="fu">addTraitAD</span><span class="op">(</span><span class="fl">10</span>, meanDD<span class="op">=</span><span class="fl">0.5</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">SP</span><span class="op">$</span><span class="fu">setVarE</span><span class="op">(</span>h2<span class="op">=</span><span class="fl">0.5</span><span class="op">)</span></span></span>
 <span class="r-in"><span></span></span>
@@ -83,16 +84,16 @@
 <span class="r-in"><span><span class="va">pop</span><span class="op">@</span><span class="va">ebv</span> <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/matrix.html" class="external-link">matrix</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">pop</span><span class="op">@</span><span class="va">nInd</span><span class="op">)</span>, nrow<span class="op">=</span><span class="va">pop</span><span class="op">@</span><span class="va">nInd</span>, ncol<span class="op">=</span><span class="fl">1</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu">ebv</span><span class="op">(</span><span class="va">pop</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>             [,1]</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [1,]  0.6403001</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [2,] -0.2183500</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [3,] -0.1038144</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [4,]  0.1925738</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [5,] -0.4630351</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [6,]  0.1861946</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [7,]  0.3774523</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [8,]  0.9591922</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [9,]  1.0574429</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [10,] -2.2594431</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [1,] -0.2840303</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [2,] -0.2331972</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [3,] -0.8085345</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [4,]  0.9610741</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [5,] -2.0786189</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [6,]  0.3346343</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [7,] -1.9796300</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [8,] -1.1964133</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  [9,] -0.4014748</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [10,] -0.7810435</span>
 <span class="r-in"><span></span></span>
 </code></pre></div>
     </div>
