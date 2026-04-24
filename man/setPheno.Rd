@@ -2,6 +2,8 @@
 % Please edit documentation in R/phenotypes.R
 \name{setPheno}
 \alias{setPheno}
+\alias{setPheno,Pop-method}
+\alias{setPheno,MultiPop-method}
 \title{Set phenotypes}
 \usage{
 setPheno(
@@ -17,6 +19,34 @@ setPheno(
   traits = NULL,
   simParam = NULL,
   ...
+)
+
+\S4method{setPheno}{Pop}(
+  pop,
+  h2 = NULL,
+  H2 = NULL,
+  varE = NULL,
+  corE = NULL,
+  reps = 1,
+  fixEff = 1L,
+  p = NULL,
+  onlyPheno = FALSE,
+  traits = NULL,
+  simParam = NULL
+)
+
+\S4method{setPheno}{MultiPop}(
+  pop,
+  h2 = NULL,
+  H2 = NULL,
+  varE = NULL,
+  corE = NULL,
+  reps = 1,
+  fixEff = 1L,
+  p = NULL,
+  onlyPheno = FALSE,
+  traits = NULL,
+  simParam = NULL
 )
 }
 \arguments{
@@ -99,6 +129,13 @@ breeding programs. In this case, varE is set to the plot error and
 reps is set to the number of plots per entry. The resulting phenotype
 represents the entry-means.
 }
+\section{Functions}{
+\itemize{
+\item \code{setPheno(Pop)}: Method for \code{\link{Pop-class}}
+
+\item \code{setPheno(MultiPop)}: Method for \code{\link{MultiPop-class}} objects
+
+}}
 \examples{
 #Create founder haplotypes
 founderPop = quickHaplo(nInd=10, nChr=1, segSites=10)

@@ -157,9 +157,50 @@ calcPheno = function(pop, varE, reps, p, traits, simParam=NULL){
 #' pop = setPheno(pop, varE=1)
 #'
 #' @export
-setPheno = function(pop, h2=NULL, H2=NULL, varE=NULL, corE=NULL,
-                    reps=1, fixEff=1L, p=NULL, onlyPheno=FALSE,
-                    traits=NULL, simParam=NULL, ...){
+setGeneric(
+  "setPheno",
+  function(
+    pop, h2=NULL, H2=NULL, varE=NULL, corE=NULL, reps=1, fixEff=1L, p=NULL,
+    onlyPheno=FALSE, traits=NULL, simParam=NULL,...){
+    standardGeneric("setPheno")
+  }
+)
+
+#' @describeIn setPheno Method for \code{\link{Pop-class}}
+#' @export
+setMethod(
+  "setPheno",
+  signature(pop = "Pop"),
+  function(
+    pop, h2=NULL, H2=NULL, varE=NULL, corE=NULL, reps=1, fixEff=1L, p=NULL,
+    onlyPheno=FALSE, traits=NULL, simParam=NULL) {
+    .setPheno_internal(
+      pop=pop, h2=h2, H2=H2, varE=varE, corE=corE, reps=reps, fixEff=fixEff,
+      p=p, onlyPheno=onlyPheno, traits=traits, simParam=simParam
+    )
+  }
+)
+
+#' @describeIn setPheno Method for \code{\link{MultiPop-class}} objects
+#' @export
+setMethod(
+  "setPheno",
+  signature(pop = "MultiPop"),
+  function(
+    pop, h2=NULL, H2=NULL, varE=NULL, corE=NULL, reps=1, fixEff=1L, p=NULL,
+    onlyPheno=FALSE, traits=NULL, simParam=NULL) {
+    .setPheno_internal(
+      pop=pop, h2=h2, H2=H2, varE=varE, corE=corE, reps=reps, fixEff=fixEff,
+      p=p, onlyPheno=onlyPheno, traits=traits,simParam=simParam
+    )
+  }
+)
+
+# Internal implementation shared by all setPheno methods.
+# @keywords internal
+.setPheno_internal = function(
+    pop, h2=NULL, H2=NULL, varE=NULL, corE=NULL, reps=1, fixEff=1L, p=NULL,
+    onlyPheno=FALSE, traits=NULL, simParam=NULL) {
   if(is.null(simParam)){
     simParam = get("SP",envir=.GlobalEnv)
   }
@@ -339,9 +380,9 @@ setPheno = function(pop, h2=NULL, H2=NULL, varE=NULL, corE=NULL,
 #' SP$setVarE(varE = trtVarELog)
 #' pop = newPop(founderPop)
 #' popLarge = randCross(pop, nCrosses = 1000)
-#' 
+#'
 #' meanVarFun = function(x) list(mean = mean(x), var = var(x))
-#' 
+#'
 #' #Latent phenotypes and parameters
 #' (phenoLog = pheno(pop))
 #' phenoLogLarge = pheno(popLarge)
@@ -364,7 +405,7 @@ setPheno = function(pop, h2=NULL, H2=NULL, varE=NULL, corE=NULL,
 #' cbind(phenoLog = phenoLog[, 1],
 #'   phenoExpMeanLog0 = phenoExpMeanLog0,
 #'   phenoExpMeanExp1 = phenoExpMeanExp1)
-#' 
+#'
 #' tmp = cbind(phenoLog = phenoLogLarge[, 1],
 #'   phenoExpMeanLog0 = c(asLogNormal(phenoLogLarge[, 1])),
 #'   phenoExpMeanExp1 = c(asLogNormal(phenoLogLarge[, 1], meanLogShift = -trtVarPLog[1]/2)))
@@ -377,16 +418,16 @@ setPheno = function(pop, h2=NULL, H2=NULL, varE=NULL, corE=NULL,
 #' abline(v= tmp2$phenoExpMeanExp1$mean, col = "red")
 #'
 #' #Convert multiple input traits
-#' asLogNormal(pheno(pop))
-#' try(asLogNormal(pheno(pop), meanLogShift = 0))
-#' asLogNormal(pheno(pop), meanLogShift = c(0, 1))
-#' asLogNormal(pheno(pop), meanLogShift = list(0, NULL))
-#' 
+#' asLogNormal(x = pheno(pop))
+#' try(asLogNormal(x = pheno(pop), meanlog = 0))
+#' asLogNormal(x = pheno(pop), meanlog = c(0, 1))
+#' asLogNormal(x = pheno(pop), meanlog = list(0, NULL))
+#'
 #' #Store the recoded trait manually
 #' pheno(pop)
 #' pop@pheno[, 1] = asLogNormal(pheno(pop)[, 1])
 #' pheno(pop)
-#' 
+#'
 #' #Apply and store the transformation automatically via SimParam$finalizePop()
 #' finalizePopDefault = SP$finalizePop
 #' SP$finalizePop = function(pop, simParam = SP, ...) {
@@ -395,7 +436,7 @@ setPheno = function(pop, h2=NULL, H2=NULL, varE=NULL, corE=NULL,
 #' }
 #' pop = newPop(founderPop)
 #' pheno(pop)
-#' 
+#'
 #' #Apply and store the transformation automatically via SimParam$finalizePheno()
 #' SP$finalizePop = finalizePopDefault
 #' SP$finalizePheno = function(pheno, pop, simParam = SP, ...) {
@@ -533,12 +574,12 @@ asLogNormal <- function(x, meanLogShift = NULL) {
 #'               p = list(c(0.5, 0.5),
 #'                        p),
 #'               mean = trtMean, var = trtVarP)
-#' 
+#'
 #' #Store the recoded trait manually
 #' pheno(pop)
 #' pop@pheno[, 1] = asCategorical(pheno(pop)[, 1])
 #' pheno(pop)
-#' 
+#'
 #' #Apply and store the transformation automatically via SimParam$finalizePop()
 #' finalizePopDefault = SP$finalizePop
 #' SP$finalizePop = function(pop, simParam = SP, ...) {
@@ -547,7 +588,7 @@ asLogNormal <- function(x, meanLogShift = NULL) {
 #' }
 #' pop = newPop(founderPop)
 #' pheno(pop)
-#' 
+#'
 #' #Apply and store the transformation automatically via SimParam$finalizePheno()
 #' SP$finalizePop = finalizePopDefault
 #' SP$finalizePheno = function(pheno, pop, simParam = SP, ...) {
@@ -633,7 +674,7 @@ asCategorical = function(x, p = NULL, mean = 0, var = 1,
 #' @details If input trait is normal (Gaussian) then this function generates a
 #'   count trait by sampling from the Poisson generalised linear model.
 #'   As such, this function's output is stochastic.
-#' 
+#'
 #'   Specifically, it generates \code{y | x ~ Poisson(lambda)} with
 #'   \code{lambda = exp(meanLogShift + x)}. If the supplied latent values
 #'   \code{x} have mean \code{mu} and variance \code{sigma2}, then the
@@ -648,7 +689,7 @@ asCategorical = function(x, p = NULL, mean = 0, var = 1,
 #'   mean and to induce overdispersion, but it does not fully determine
 #'   the observed variance. If \code{x} already contains an added Gaussian
 #'   residual term, that latent variance contributes to the overdispersion as well.
-#' 
+#'
 #'   The name \code{meanLogShift} is used to emphasize that this argument
 #'   is an additional shift applied during transformation, not the primary
 #'   way to set the latent trait mean. In normal AlphaSimR workflow, the
@@ -730,7 +771,7 @@ asCategorical = function(x, p = NULL, mean = 0, var = 1,
 #' pheno(pop)
 #' pop@pheno[, 1] = asPoisson(pheno(pop)[, 1])
 #' pheno(pop)
-#' 
+#'
 #' #Apply and store the transformation automatically via SimParam$finalizePop()
 #' finalizePopDefault = SP$finalizePop
 #' SP$finalizePop = function(pop, simParam = SP, ...) {
@@ -739,7 +780,7 @@ asCategorical = function(x, p = NULL, mean = 0, var = 1,
 #' }
 #' pop = newPop(founderPop)
 #' pheno(pop)
-#' 
+#'
 #' #Apply and store the transformation automatically via SimParam$finalizePheno()
 #' SP$finalizePop = finalizePopDefault
 #' SP$finalizePheno = function(pheno, pop, simParam = SP, ...) {
