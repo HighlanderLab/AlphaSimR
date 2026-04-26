@@ -2,9 +2,21 @@
 % Please edit documentation in R/crossing.R
 \name{randCross}
 \alias{randCross}
+\alias{randCross,Pop-method}
 \title{Make random crosses}
 \usage{
 randCross(
+  pop,
+  nCrosses,
+  nProgeny = 1,
+  balance = TRUE,
+  parents = NULL,
+  ignoreSexes = FALSE,
+  simParam = NULL,
+  nThreads = NULL
+)
+
+\S4method{randCross}{Pop}(
   pop,
   nCrosses,
   nProgeny = 1,
@@ -20,8 +32,8 @@ randCross(
 
 \item{nCrosses}{total number of crosses to make}
 
-\item{nProgeny}{number of progeny per cross. May be a single value for all 
-crosses or a vector with values equal to the number of crosses. If providing 
+\item{nProgeny}{number of progeny per cross. May be a single value for all
+crosses or a vector with values equal to the number of crosses. If providing
 a vector, the values are randomly assigned to each cross.}
 
 \item{balance}{if using sexes, this option will balance the number
@@ -43,8 +55,13 @@ Returns an object of \code{\link{Pop-class}}
 }
 \description{
 A wrapper for \code{\link{makeCross}} that randomly
-selects parental combinations for all possible combinantions.
+selects parental combinations for all possible combinations.
 }
+\section{Functions}{
+\itemize{
+\item \code{randCross(Pop)}: Method for \code{\link{Pop-class}}
+
+}}
 \examples{
 #Create founder haplotypes
 founderPop = quickHaplo(nInd=10, nChr=1, segSites=10)

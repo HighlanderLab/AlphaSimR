@@ -2,9 +2,19 @@
 % Please edit documentation in R/crossing.R
 \name{makeCross2}
 \alias{makeCross2}
+\alias{makeCross2,Pop,Pop-method}
 \title{Make designed crosses}
 \usage{
 makeCross2(
+  females,
+  males,
+  crossPlan,
+  nProgeny = 1,
+  simParam = NULL,
+  nThreads = NULL
+)
+
+\S4method{makeCross2}{Pop,Pop}(
   females,
   males,
   crossPlan,
@@ -22,7 +32,7 @@ makeCross2(
 female and male parents. Either integers for the position in
 population or character strings for the IDs.}
 
-\item{nProgeny}{number of progeny per cross. May be a single value for all 
+\item{nProgeny}{number of progeny per cross. May be a single value for all
 crosses or a vector with values for each cross.}
 
 \item{simParam}{an object of class \code{\link{SimParam}}. If
@@ -39,6 +49,11 @@ Returns an object of \code{\link{Pop-class}}
 Makes crosses between two populations using a user supplied
 crossing plan.
 }
+\section{Functions}{
+\itemize{
+\item \code{makeCross2(females = Pop, males = Pop)}: Method for \code{\link{Pop-class}}
+
+}}
 \examples{
 #Create founder haplotypes
 founderPop = quickHaplo(nInd=10, nChr=1, segSites=10)

@@ -2,9 +2,19 @@
 % Please edit documentation in R/crossing.R
 \name{self}
 \alias{self}
+\alias{self,Pop-method}
 \title{Self individuals}
 \usage{
 self(
+  pop,
+  nProgeny = 1,
+  parents = NULL,
+  keepParents = TRUE,
+  simParam = NULL,
+  nThreads = NULL
+)
+
+\S4method{self}{Pop}(
   pop,
   nProgeny = 1,
   parents = NULL,
@@ -16,7 +26,7 @@ self(
 \arguments{
 \item{pop}{an object of \code{\link{Pop-class}}}
 
-\item{nProgeny}{number of selfed progeny per individual. May be a single value 
+\item{nProgeny}{number of selfed progeny per individual. May be a single value
 for all or a vector providing values for each individual.}
 
 \item{parents}{an optional vector of indices for allowable parents}
@@ -38,6 +48,11 @@ Returns an object of \code{\link{Pop-class}}
 Creates selfed progeny from each individual in a
 population. Only works when sexes is "no".
 }
+\section{Functions}{
+\itemize{
+\item \code{self(Pop)}: Method for \code{\link{Pop-class}}
+
+}}
 \examples{
 #Create founder haplotypes
 founderPop = quickHaplo(nInd=2, nChr=1, segSites=10)
