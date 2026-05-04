@@ -26,5 +26,7 @@ src/*.gcno
 src/**/*.gcno
 src/*.o
 src/*.so
+src/Makevars
+src/Makevars.win
 vignettes/*.html
 vignettes/*.pdf
