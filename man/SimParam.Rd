@@ -403,6 +403,10 @@ genetic map}
 
     \item{\code{recHist}}{list of historic recombination events}
 
+\item{\code{isTrackRecGen}}{is recombination being tracked. Jinyang added.}
+
+\item{\code{recHistGen}}{list of historic recombination events. Jinyang added.}
+
     \item{\code{haplotypes}}{list of computed IBD haplotypes}
 
     \item{\code{varA}}{additive genetic variance in founderPop}
@@ -426,6 +430,7 @@ relative to all active QTL}
     \item \href{#method-SimParam-initialize}{\code{SimParam$new()}}
     \item \href{#method-SimParam-setTrackPed}{\code{SimParam$setTrackPed()}}
     \item \href{#method-SimParam-setTrackRec}{\code{SimParam$setTrackRec()}}
+    \item \href{#method-SimParam-setTrackRecGen}{\code{SimParam$setTrackRecGen()}}
     \item \href{#method-SimParam-resetPed}{\code{SimParam$resetPed()}}
     \item \href{#method-SimParam-restrSegSites}{\code{SimParam$restrSegSites()}}
     \item \href{#method-SimParam-setSexes}{\code{SimParam$setSexes()}}
@@ -569,7 +574,26 @@ SP$setTrackRec(TRUE)
     \if{html}{\out{</div>}}
   }
 }
+\if{html}{\out{<hr>}}
+\if{html}{\out{<a id="method-SimParam-setTrackRecGen"></a>}}
+\if{latex}{\out{\hypertarget{method-SimParam-setTrackRecGen}{}}}
+\subsection{Method \code{setTrackRecGen()}}{
+Sets genetic-coordinate recombination tracking for the simulation. Jinyang added.
+By default this is turned off. When turned on, it will also turn on pedigree tracking.
+\subsection{Usage}{
+\if{html}{\out{<div class="r">}}\preformatted{SimParam$setTrackRecGen(isTrackRecGen, force = FALSE)}\if{html}{\out{</div>}}
+}
 
+\subsection{Arguments}{
+\if{html}{\out{<div class="arguments">}}
+\describe{
+\item{\code{isTrackRecGen}}{should genetic-coordinate recombination tracking be on.}
+
+\item{\code{force}}{should the check for a running simulation be ignored.}
+}
+\if{html}{\out{</div>}}
+}
+}
 \if{html}{\out{<hr>}}
 \if{html}{\out{<a id="method-SimParam-resetPed"></a>}}
 \if{latex}{\out{\hypertarget{method-SimParam-resetPed}{}}}
@@ -1807,7 +1831,7 @@ be metacentric.}
   For internal use only.
   \subsection{Usage}{
     \if{html}{\out{<div class="r">}}
-    \preformatted{SimParam$addToRec(lastId, id, mother, father, isDH, hist, ploidy)}
+    \preformatted{SimParam$addToRec(lastId, id, mother, father, isDH, hist, histGen = NULL, ploidy)}
     \if{html}{\out{</div>}}
   }
   \subsection{Arguments}{
@@ -1819,6 +1843,7 @@ be metacentric.}
       \item{\code{father}}{vector of father iids}
       \item{\code{isDH}}{indicator for DH lines}
       \item{\code{hist}}{new recombination history}
+      \item{\code{histGen}}{new recombination history (genetic coordinate)}
       \item{\code{ploidy}}{ploidy level}
     }
     \if{html}{\out{</div>}}

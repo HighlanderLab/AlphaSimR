@@ -1,0 +1,51 @@
+#segSites = n
+#qualifiedSites = N
+
+Algorithm: if we make segSites as a list with size $n$, for the first $n$ qualifiedSites, along the chromosome, we just put it in the list; for the others (e.g. index $i$), we generate a random number from 0 to $i$, if $i <= n$, we put it in the list, or we discard it.
+
+1. Probability of a site $i$ entry the list
+$$
+P(entry) =
+\begin{cases}
+1, & i <= n, \\
+\frac{n}{i}, & i > n .
+\end{cases}
+$$
+2. Probability of a site $i$ in the list being replace at step $j$ $(i<j<=N)$
+$$
+P(being\ replaced)=P(j\ entry)*P(sample\ i\ from\ list) 
+= \frac{n}{j}*\frac{1}{n}=\frac{1}{j}
+$$
+2. Probability of a site $i$ in the list NOT being replace at step $j$ $(i<j<=N)$
+$$
+P(not\ being\ replaced)=1-\frac{1}{j}=\frac{j-1}{j}
+$$
+3. Probability of a site $i$ in the list NOT being replace at the end $(j=N)$
+For $i<=n$
+$$
+P(not\ being\ replaced)=\prod_{j=n+1}^N \frac{j-1}{j}\\
+= \frac{n}{n+1}*\frac{n+1}{n+2}*\frac{n+2}{n+3}...\frac{N-1}{N}\\
+= \frac{n}{N}
+$$
+For $i>n$
+$$
+P(not\ being\ replaced)=\prod_{j=i+1}^N \frac{j-1}{j}\\
+= \frac{i}{i+1}*\frac{i+1}{i+2}*\frac{i+2}{i+3}...\frac{N-1}{N}\\
+= \frac{i}{N}
+$$
+3. Probability of a site $i$ in the list at the end $(j=N)$
+$$
+P(in\ the\ list)=P(entry) * P(not\ being\ replaced)
+$$
+$$
+P(in\ the\ list) =
+\begin{cases}
+1*\frac{n}{N}, & i <= n, \\
+\frac{n}{i}*\frac{i}{N}, & i > n .
+\end{cases}\\
+=\begin{cases}
+\frac{n}{N}, & i <= n, \\
+\frac{n}{N}, & i > n .
+\end{cases}
+$$
+So, all the qualifiedSites along the chromosome have the same probability being sampled.

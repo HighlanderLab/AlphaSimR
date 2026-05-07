@@ -686,7 +686,7 @@ newPop = function(rawPop,ploidy=NULL,simParam=NULL,nThreads=NULL,...){
 .newPop = function(rawPop, id=NULL, mother=NULL, father=NULL,
                    iMother=NULL, iFather=NULL, isDH=NULL,
                    femaleParentPop=NULL, maleParentPop=NULL,
-                   hist=NULL, simParam=NULL, nThreads=NULL,...){
+                   hist=NULL, histGen=NULL, simParam=NULL, nThreads=NULL,...){
   if(is.null(simParam)){
     simParam = get("SP",envir=.GlobalEnv)
   }
@@ -813,7 +813,7 @@ newPop = function(rawPop,ploidy=NULL,simParam=NULL,nThreads=NULL,...){
 
   if(simParam$isTrackPed){
     if(simParam$isTrackRec){
-      simParam$addToRec(lastId,id,iMother,iFather,isDH,hist,output@ploidy)
+      simParam$addToRec(lastId,id,iMother,iFather,isDH,hist,histGen,output@ploidy) #Jinyang modified
     }else{
       simParam$addToPed(lastId,id,iMother,iFather,isDH)
     }

@@ -30,3 +30,5 @@ src/Makevars
 src/Makevars.win
 vignettes/*.html
 vignettes/*.pdf
+.idea/
+src/.idea/
