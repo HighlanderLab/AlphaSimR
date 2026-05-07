@@ -446,12 +446,13 @@ arma::Mat<int> findBivalentCO(const arma::vec& genMap, double v, double p,
 // Continuous (genetic-coordinate) recombination history for a bivalent pair
 // Output columns: (originChr, startPosGen)
 // Row 0 is always (1, 0.0)
-arma::Mat<double> findBivalentCO_gen(const arma::vec& genMap, double v, double p){
+arma::Mat<double> findBivalentCO_gen(const arma::vec& genMap, double v, double p,
+                                     alphasimrRng::rngEngine& rng){
   arma::uword readChr = 0;
   double genLen = genMap(genMap.n_elem-1);
 
   // 1) Sample crossover positions on the genetic map
-  arma::vec posCO = sampleChiasmata(genLen, v, p);
+  arma::vec posCO = sampleChiasmata(genLen, v, p, rng);
 
   // If no chiasmata were sampled: return a single record (all from chr1)
   if(posCO.n_elem==0){
@@ -462,7 +463,7 @@ arma::Mat<double> findBivalentCO_gen(const arma::vec& genMap, double v, double p
   }
 
   // 2）Thin crossovers
-  arma::vec thin(posCO.n_elem, arma::fill::randu);
+  arma::vec thin = alphasimrRng::runifVec(posCO.n_elem, rng);
   posCO = posCO(find(thin>0.5));
 
   arma::uword nCO = posCO.n_elem;
@@ -1030,7 +1031,8 @@ void bivalent2(const arma::Col<unsigned char>& chr1,
                double p,
                arma::Col<unsigned char>& output,
                arma::Mat<int>& hist,
-               arma::Mat<double>& histGen){
+               arma::Mat<double>& histGen,
+               alphasimrRng::rngEngine& rng){
 
   arma::uword startPos = 0;
   arma::uword endPos;
@@ -1038,11 +1040,11 @@ void bivalent2(const arma::Col<unsigned char>& chr1,
   double genLen = genMap(genMap.n_elem - 1);
 
   // 1) Sample crossover positions once (shared)
-  arma::vec posCO = sampleChiasmata(genLen, v, p);
+  arma::vec posCO = sampleChiasmata(genLen, v, p, rng);
 
   // 2) Thin crossovers (same rule as original)
   if(posCO.n_elem > 0){
-    arma::vec thin(posCO.n_elem, arma::fill::randu);
+    arma::vec thin = alphasimrRng::runifVec(posCO.n_elem, rng);
     posCO = posCO(find(thin > 0.5));
   }
 
@@ -1136,12 +1138,13 @@ void bivalent2Old(const arma::Col<unsigned char>& chr1,
                arma::Col<unsigned char>& output,
                arma::Mat<int>& hist,
                // histGen added
-               arma::Mat<double>& histGen){
+               arma::Mat<double>& histGen,
+               alphasimrRng::rngEngine& rng){
 
-  hist = findBivalentCO(genMap, v, p);
+  hist = findBivalentCO(genMap, v, p, rng);
 
   // histGen added
-  histGen = findBivalentCO_gen(genMap, v, p);
+  histGen = findBivalentCO_gen(genMap, v, p, rng);
 
   if(hist.n_rows==1){
     output = chr1;
@@ -1408,7 +1411,8 @@ Rcpp::List cross(
                         p,
                         gamete1,
                         hist1,
-                        histG1);
+                        histG1,
+                        rng);
             } else {// ----modified by Jinyang
               bivalent(motherGeno(chr).slice(mother(ind)).col(xm(x)),
                        motherGeno(chr).slice(mother(ind)).col(xm(x+1)),
@@ -1447,7 +1451,8 @@ Rcpp::List cross(
                         p,
                         gamete1,
                         hist1,
-                        histG1);
+                        histG1,
+                        rng);
             } else {
               // ----modified by Jinyang
               bivalent(motherGeno(chr).slice(mother(ind)).col(xm(x+2)),
@@ -1526,7 +1531,8 @@ Rcpp::List cross(
                      v,
                      p,
                      gamete1,
-                     hist1);
+                     hist1,
+                     rng);
           }
 
           tmpGeno.slice(ind).col(progenyChr) = gamete1;
@@ -1564,7 +1570,8 @@ Rcpp::List cross(
                         p,
                         gamete1,
                         hist1,
-                        histG1);
+                        histG1,
+                        rng);
             } else {
               // ----modified by Jinyang
               bivalent(fatherGeno(chr).slice(father(ind)).col(xf(x)),
@@ -1603,7 +1610,8 @@ Rcpp::List cross(
                         p,
                         gamete1,
                         hist1,
-                        histG1);
+                        histG1,
+                        rng);
             } else {
               // ----modified by Jinyang
               bivalent(fatherGeno(chr).slice(father(ind)).col(xf(x+2)),
@@ -1671,7 +1679,8 @@ Rcpp::List cross(
                       p,
                       gamete1,
                       hist1,
-                      histG1);
+                      histG1,
+                      rng);
           } else {
             // ----modified by Jinyang
             bivalent(fatherGeno(chr).slice(father(ind)).col(xf(x)),
