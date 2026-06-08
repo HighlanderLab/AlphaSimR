@@ -43,7 +43,7 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: github::HighlanderLab/RcppTskit/RcppTskit, any::rcmdcheck
+          extra-packages: github::LynxJinyangii/RcppTskit/RcppTskit@add-multiple-functions-on-pr-131, any::rcmdcheck
           needs: check
 
       - uses: r-lib/actions/check-r-package@v2

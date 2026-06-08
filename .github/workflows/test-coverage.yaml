@@ -36,7 +36,7 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: github::HighlanderLab/RcppTskit/RcppTskit, any::covr, any::xml2
+          extra-packages: github::LynxJinyangii/RcppTskit/RcppTskit@add-multiple-functions-on-pr-131, any::covr, any::xml2
           needs: coverage
 
       - name: Test coverage

@@ -3,7 +3,7 @@ context("MaCSTS staged simAnc/simMut checks")
 skip_if_not_installed("RcppTskit")
 
 ts_get <- function(ts, name) {
-  value <- tryCatch(ts[[name]], error = function(e) NULL)
+  value <- ts[[name]]
   if (is.function(value)) {
     value()
   } else {
@@ -12,17 +12,9 @@ ts_get <- function(ts, name) {
 }
 
 ts_variants_iterator <- function(ts) {
-  variants <- tryCatch(ts[["variants"]], error = function(e) NULL)
-  if (is.null(variants)) {
-    variants <- tryCatch(ts$variants, error = function(e) NULL)
-  }
+  variants <- ts[["variants"]]
   if (is.function(variants)) {
-    out <- tryCatch(variants(), error = function(e) NULL)
-    if (is.null(out)) {
-      variants
-    } else {
-      out
-    }
+    variants()
   } else {
     variants
   }
@@ -36,10 +28,7 @@ ts_next_variant <- function(it) {
     return(it())
   }
   
-  nxt <- tryCatch(it[["next_variant"]], error = function(e) NULL)
-  if (is.null(nxt)) {
-    nxt <- tryCatch(it$next_variant, error = function(e) NULL)
-  }
+  nxt <- it[["next_variant"]]
   if (!is.null(nxt)) {
     if (is.function(nxt)) {
       return(nxt())
@@ -47,7 +36,7 @@ ts_next_variant <- function(it) {
     return(nxt)
   }
   
-  nxt <- tryCatch(it[["next"]], error = function(e) NULL)
+  nxt <- it[["next"]]
   if (!is.null(nxt)) {
     if (is.function(nxt)) {
       return(nxt())
@@ -55,7 +44,7 @@ ts_next_variant <- function(it) {
     return(nxt)
   }
   
-  stop("Variant iterator has neither callable 'next_variant' nor 'next'")
+  return(NULL)
 }
 
 ts_variant_keys <- function(tc_xptr) {
