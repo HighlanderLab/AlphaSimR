@@ -32,3 +32,10 @@ vignettes/*.html
 vignettes/*.pdf
 .idea/
 src/.idea/
+.Rlib/
+*tar.gz
+__pycache__/
+testData/out_phase1_useMacsMut_FALSE/*.trees
+testData/out_msprime_from_macs/*.trees
+dev/testData/out_phase1_useMacsMut_FALSE/*.trees
+dev/testData/out_msprime_from_macs/*.trees

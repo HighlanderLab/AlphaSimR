@@ -1147,6 +1147,59 @@ void GraphBuilder::addMutations(double startPos,double endPos){
   }
 }
 
+void GraphBuilder::addMutationsTs(double startPos,double endPos){
+  bool bEndMutate = false;
+  while(!bEndMutate){
+    // find the next point on this interval
+    startPos+=pRandNumGenerator->expRV(dLastTreeLength*
+      pConfig->dTheta);
+    if (startPos>=endPos){
+      bEndMutate = true;
+    }else{
+      double dRandomSpot = pRandNumGenerator->unifRV() * dLastTreeLength;
+      double dMutationTime=-1.;
+      EdgePtr selectedEdge = getRandomEdgeOnTree(dMutationTime,dRandomSpot);
+      if (pTsRecorder) {
+        pTsRecorder->recordMutation(startPos, selectedEdge, dMutationTime);
+      }
+      // Keep existing behavior for now so TS and non-TS remain comparable.
+      mutateBelowEdge(selectedEdge);
+      
+      unique_ptr<AlphaSimRReturn> temp(new AlphaSimRReturn());
+      temp->length = startPos;
+      unsigned int iSampleSize = pConfig->iSampleSize;
+      for (unsigned int iSampleIndex=0;iSampleIndex<iSampleSize;++iSampleIndex){
+        SampleNode * sample = static_cast<SampleNode*>(pSampleNodeArray[iSampleIndex].get());
+        sites[iSampleIndex]=sample->bAffected;
+        temp->haplotypes.push_back(sample->bAffected);
+        sample->bAffected=false;
+      }
+      mutations.push_back(*temp);
+      double dFreq=0.;
+      if (pConfig->bSNPAscertainment){
+        int counts=0;
+        for (unsigned int i=0;i<iSampleSize;++i){
+          counts=counts+sites[i];
+        }
+        dFreq = 1.*counts/iSampleSize;
+        if (pConfig->bFlipAlleles && dFreq>.5){
+          for (unsigned int i=0;i<iSampleSize;++i){
+            sites[i]=!sites[i];
+          }
+          dFreq = 1.-dFreq;
+        }
+        AlleleFreqBinPtr query(new AlleleFreqBin(dFreq,dFreq,0.));
+        AlleleFreqBinPtrSet::iterator it = pConfig->pAlleleFreqBinPtrSet->find(query);
+        if (it!=pConfig->pAlleleFreqBinPtrSet->end()){
+          AlleleFreqBinPtr bin = *it;
+          ++bin->iObservedCounts;
+        }else throw "Did not find a frequency range for freq";
+      }
+      pMutationPtrVector->push_back(new Mutation(startPos, dFreq));
+    }
+  }
+}
+
 bool GraphBuilder::getNextPos(double & curPos,HotSpotBinPtrList::iterator & hotSpotIt){
   bool bBinCrossed = false;
   if (hotSpotIt==pConfig->pHotSpotBinPtrList->end()){
@@ -1304,7 +1357,107 @@ void GraphBuilder::build(){
 
 }
 
+void GraphBuilder::buildTs(bool usePhysicalPositions, bool useMacsMut,
+                           bool inbred, unsigned int ploidy){
+  pTsRecorder.reset(new TsRecorder(
+      pConfig->dSeqLength,
+      usePhysicalPositions ? TsPositionMode::PHYSICAL_BP : TsPositionMode::MACS_UNIT,
+      inbred,
+      ploidy));
+
+  double curPos = 0.0,lastPos = 0.0,dMaxPos = 1.0;
+  unsigned int iLastCumulativePos = 0;
+  
+  HotSpotBinPtrList::iterator hotSpotIt;
+  if (pConfig->bVariableRecomb){
+    hotSpotIt=pConfig->pHotSpotBinPtrList->begin();
+  }
+  // gene conversion stuff
+  GeneConversionPtr newGC;
+  double dLogTractRatio = log((pConfig->iGeneConvTract-1.)/pConfig->iGeneConvTract);
+  int iHistoryMax = 0;
+  do{
+    if (iGraphIteration==0){
+      NodePtr dummy1;
+      EventPtr dummy2;
+      this->traverseEvents(false,dummy1,dummy2);
+      if (pTsRecorder) {
+        pTsRecorder->preRegisterSamples(pSampleNodeArray, pConfig->iSampleSize);
+      }
+    }else{
+      // at this point decide whether we invoke a plain x-over
+      // or a new gene conversion event
+      this->bBeginGeneConversion = false;
+      if (this->bEndGeneConversion){
+      }else{
+        this->bBeginGeneConversion = pRandNumGenerator->unifRV()<
+          (pConfig->dGeneConvRatio/(pConfig->dGeneConvRatio+1))?true:false;
+        if (bBeginGeneConversion){
+          double dTractLen = (1.+log(pRandNumGenerator->unifRV())/
+                              dLogTractRatio)/pConfig->dSeqLength;
+          newGC = GeneConversionPtr(new GeneConversion(
+            curPos+dTractLen));
+          pGeneConversionPtrSet->insert(newGC);
+        }
+      }
+      invokeRecombination(newGC);
+      // mark the graph edges as the local tree
+      markCurrentTree();
+      if (!bIncrementHistory){
+        double dBoundary = curPos - dTrailingGap;
+        if (dBoundary>0.){
+          bIncrementHistory = true;
+        }
+      }else{
+        ++iHistoryMax;
+      }
+      if (iHistoryMax>=0){
+        pruneARG(iHistoryMax);
+      }
+    }
+    
+    initializeCurrentTree();
+    
+    if (pConfig->bVariableRecomb){
+      bool bBinCrossed;
+      do{
+        bBinCrossed = getNextPos(curPos,hotSpotIt);
+      }while(bBinCrossed);
+    }else{
+      curPos+=pRandNumGenerator->expRV(getRate());
+    }
+    // check if we reached the end of the region
+    if (curPos>dMaxPos) curPos=dMaxPos;
+    if (pConfig->bNewickFormat){
+      uint iSegLength = curPos*pConfig->dSeqLength-iLastCumulativePos;
+      iLastCumulativePos += iSegLength;
+    }
+    // check if there was an existing gene conversion event that needs
+    // to be closed. backtrack if necessary.
+    this->bEndGeneConversion  = checkPendingGeneConversions(curPos);
+    if (pTsRecorder) {
+      pTsRecorder->recordTreeInterval(*pEdgeVectorInTree, iTotalTreeEdges,
+                                      lastPos, curPos);
+    }
+    if (useMacsMut && pConfig->dTheta>0.0){
+      addMutationsTs(lastPos,curPos);
+    }
+    lastPos = curPos;
+    ++iGraphIteration;
+  }while(curPos<dMaxPos);
+  if (pTsRecorder) {
+    pTsRecorder->simplify();
+  }
+}
+
 vector<AlphaSimRReturn> GraphBuilder::getMutations() {
   return mutations;
 }
 
+tsk_table_collection_t * GraphBuilder::releaseTableCollectionTs(double timeScale,
+                                                                bool expandInbred) {
+  if (!pTsRecorder) {
+    return nullptr;
+  }
+  return pTsRecorder->release(timeScale, expandInbred);
+}

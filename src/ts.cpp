@@ -1,5 +1,6 @@
 #include "alphasimr.h"
 #include <RcppTskit.hpp>
+#include "postTS.h"
 // [[Rcpp::depends(RcppTskit)]]
 // [[Rcpp::plugins(RcppTskit)]]
 
@@ -55,4 +56,31 @@ Rcpp::List rtsk_table_collection_summary2(const SEXP tc) {
 int rtsk_treeseq_get_num_individuals2(const SEXP ts) {
   rtsk_treeseq_t ts_xptr(ts);
   return static_cast<int>(tsk_treeseq_get_num_individuals(ts_xptr));
+}
+
+// [[Rcpp::export]]
+void tsMutateTableCollection(const SEXP tc, const double theta,
+                             const uint64_t seed) {
+  rtsk_table_collection_t tc_xptr(tc);
+  tsk_table_collection_t *tables = tc_xptr;
+  tsPost::mutateTablesInPlace(tables, theta, seed);
+}
+
+// [[Rcpp::export]]
+void tsFinalizeInbredTableCollection(const SEXP tc, const int ploidy) {
+  if (ploidy <= 1) {
+    return;
+  }
+  rtsk_table_collection_t tc_xptr(tc);
+  tsk_table_collection_t *tables = tc_xptr;
+  if (tables == nullptr) {
+    Rcpp::stop("Table collection pointer is null");
+  }
+  
+  tsPost::expandInbredSamplesInPlace(tables, static_cast<unsigned int>(ploidy));
+  (void)tsk_table_collection_drop_index(tables, 0);
+  tsPost::checkTsk(tsk_table_collection_sort(tables, nullptr, 0),
+                   "Failed to sort table collection after inbred finalization");
+  tsPost::checkTsk(tsk_table_collection_build_index(tables, 0),
+                   "Failed to build index after inbred finalization");
 }

@@ -399,6 +399,10 @@ MaCS <- function(args, maxSites, inbred, ploidy, nThreads, seed) {
     .Call(`_AlphaSimR_MaCS`, args, maxSites, inbred, ploidy, nThreads, seed)
 }
 
+MaCSTS <- function(args, nChr, inbred, ploidy, nThreads, seed, usePhysicalPositions = FALSE, useMacsMut = FALSE, Nref = NA_real_, expandInbredSamples = TRUE) {
+    .Call(`_AlphaSimR_MaCSTS`, args, nChr, inbred, ploidy, nThreads, seed, usePhysicalPositions, useMacsMut, Nref, expandInbredSamples)
+}
+
 #' @title Summarise `tskit` table collection
 #' @param tc an external pointer to a \code{tsk_table_collection_t} object.
 #' @return A list.
@@ -424,5 +428,13 @@ rtsk_table_collection_summary2 <- function(tc) {
 #' @export
 rtsk_treeseq_get_num_individuals2 <- function(ts) {
     .Call(`_AlphaSimR_rtsk_treeseq_get_num_individuals2`, ts)
+}
+
+tsMutateTableCollection <- function(tc, theta, seed) {
+    invisible(.Call(`_AlphaSimR_tsMutateTableCollection`, tc, theta, seed))
+}
+
+tsFinalizeInbredTableCollection <- function(tc, ploidy) {
+    invisible(.Call(`_AlphaSimR_tsFinalizeInbredTableCollection`, tc, ploidy))
 }
 

@@ -886,6 +886,26 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// MaCSTS
+Rcpp::List MaCSTS(Rcpp::String args, int nChr, bool inbred, arma::uword ploidy, int nThreads, arma::uvec seed, bool usePhysicalPositions, bool useMacsMut, double Nref, bool expandInbredSamples);
+RcppExport SEXP _AlphaSimR_MaCSTS(SEXP argsSEXP, SEXP nChrSEXP, SEXP inbredSEXP, SEXP ploidySEXP, SEXP nThreadsSEXP, SEXP seedSEXP, SEXP usePhysicalPositionsSEXP, SEXP useMacsMutSEXP, SEXP NrefSEXP, SEXP expandInbredSamplesSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::String >::type args(argsSEXP);
+    Rcpp::traits::input_parameter< int >::type nChr(nChrSEXP);
+    Rcpp::traits::input_parameter< bool >::type inbred(inbredSEXP);
+    Rcpp::traits::input_parameter< arma::uword >::type ploidy(ploidySEXP);
+    Rcpp::traits::input_parameter< int >::type nThreads(nThreadsSEXP);
+    Rcpp::traits::input_parameter< arma::uvec >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< bool >::type usePhysicalPositions(usePhysicalPositionsSEXP);
+    Rcpp::traits::input_parameter< bool >::type useMacsMut(useMacsMutSEXP);
+    Rcpp::traits::input_parameter< double >::type Nref(NrefSEXP);
+    Rcpp::traits::input_parameter< bool >::type expandInbredSamples(expandInbredSamplesSEXP);
+    rcpp_result_gen = Rcpp::wrap(MaCSTS(args, nChr, inbred, ploidy, nThreads, seed, usePhysicalPositions, useMacsMut, Nref, expandInbredSamples));
+    return rcpp_result_gen;
+END_RCPP
+}
 // rtsk_table_collection_summary2
 Rcpp::List rtsk_table_collection_summary2(const SEXP tc);
 RcppExport SEXP _AlphaSimR_rtsk_table_collection_summary2(SEXP tcSEXP) {
@@ -906,6 +926,29 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const SEXP >::type ts(tsSEXP);
     rcpp_result_gen = Rcpp::wrap(rtsk_treeseq_get_num_individuals2(ts));
     return rcpp_result_gen;
+END_RCPP
+}
+// tsMutateTableCollection
+void tsMutateTableCollection(const SEXP tc, const double theta, const uint64_t seed);
+RcppExport SEXP _AlphaSimR_tsMutateTableCollection(SEXP tcSEXP, SEXP thetaSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const SEXP >::type tc(tcSEXP);
+    Rcpp::traits::input_parameter< const double >::type theta(thetaSEXP);
+    Rcpp::traits::input_parameter< const uint64_t >::type seed(seedSEXP);
+    tsMutateTableCollection(tc, theta, seed);
+    return R_NilValue;
+END_RCPP
+}
+// tsFinalizeInbredTableCollection
+void tsFinalizeInbredTableCollection(const SEXP tc, const int ploidy);
+RcppExport SEXP _AlphaSimR_tsFinalizeInbredTableCollection(SEXP tcSEXP, SEXP ploidySEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const SEXP >::type tc(tcSEXP);
+    Rcpp::traits::input_parameter< const int >::type ploidy(ploidySEXP);
+    tsFinalizeInbredTableCollection(tc, ploidy);
+    return R_NilValue;
 END_RCPP
 }
 
@@ -967,8 +1010,11 @@ static const R_CallMethodDef CallEntries[] = {
     {"_AlphaSimR_rngDiagnosticsSampleInt", (DL_FUNC) &_AlphaSimR_rngDiagnosticsSampleInt, 4},
     {"_AlphaSimR_rngDiagnosticsSamplePoisson", (DL_FUNC) &_AlphaSimR_rngDiagnosticsSamplePoisson, 3},
     {"_AlphaSimR_MaCS", (DL_FUNC) &_AlphaSimR_MaCS, 6},
+    {"_AlphaSimR_MaCSTS", (DL_FUNC) &_AlphaSimR_MaCSTS, 10},
     {"_AlphaSimR_rtsk_table_collection_summary2", (DL_FUNC) &_AlphaSimR_rtsk_table_collection_summary2, 1},
     {"_AlphaSimR_rtsk_treeseq_get_num_individuals2", (DL_FUNC) &_AlphaSimR_rtsk_treeseq_get_num_individuals2, 1},
+    {"_AlphaSimR_tsMutateTableCollection", (DL_FUNC) &_AlphaSimR_tsMutateTableCollection, 3},
+    {"_AlphaSimR_tsFinalizeInbredTableCollection", (DL_FUNC) &_AlphaSimR_tsFinalizeInbredTableCollection, 2},
     {NULL, NULL, 0}
 };
 
