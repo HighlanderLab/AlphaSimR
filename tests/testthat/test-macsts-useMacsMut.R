@@ -5,7 +5,7 @@ to_int01_matrix <- function(x) {
 }
 
 ts_get <- function(ts, name) {
-  value <- ts[[name]]
+  value <- tryCatch(ts[[name]], error = function(e) NULL)
   if (is.function(value)) {
     value()
   } else {
@@ -14,30 +14,51 @@ ts_get <- function(ts, name) {
 }
 
 ts_variants_iterator <- function(ts) {
-  variants <- ts$variants
+  variants <- tryCatch(ts[["variants"]], error = function(e) NULL)
+  if (is.null(variants)) {
+    variants <- tryCatch(ts$variants, error = function(e) NULL)
+  }
   if (is.function(variants)) {
-    variants()
+    out <- tryCatch(variants(), error = function(e) NULL)
+    if (is.null(out)) {
+      # Some APIs expose variants as a callable "next variant" closure.
+      variants
+    } else {
+      out
+    }
   } else {
     variants
   }
 }
 
 ts_next_variant <- function(it) {
-  if ("next_variant" %in% ls(it)) {
-    nxt <- it[["next_variant"]]
+  if (is.null(it)) {
+    return(NULL)
+  }
+  if (is.function(it)) {
+    return(it())
+  }
+  
+  nxt <- tryCatch(it[["next_variant"]], error = function(e) NULL)
+  if (is.null(nxt)) {
+    nxt <- tryCatch(it$next_variant, error = function(e) NULL)
+  }
+  if (!is.null(nxt)) {
     if (is.function(nxt)) {
       return(nxt())
     }
     return(nxt)
   }
-  if ("next" %in% ls(it)) {
-    nxt <- it[["next"]]
+  
+  nxt <- tryCatch(it[["next"]], error = function(e) NULL)
+  if (!is.null(nxt)) {
     if (is.function(nxt)) {
       return(nxt())
     }
     return(nxt)
   }
-  stop("Variant iterator has neither 'next_variant' nor 'next'")
+  
+  stop("Variant iterator has neither callable 'next_variant' nor 'next'")
 }
 
 extract_macs_chr <- function(macs_out, chr = 1L, nThreads = 1L) {
