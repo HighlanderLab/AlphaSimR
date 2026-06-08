@@ -4,6 +4,24 @@ to_int01_matrix <- function(x) {
   matrix(as.integer(x), nrow = nrow(x), ncol = ncol(x), dimnames = dimnames(x))
 }
 
+ts_get <- function(ts, name) {
+  value <- ts[[name]]
+  if (is.function(value)) {
+    value()
+  } else {
+    value
+  }
+}
+
+ts_variants_iterator <- function(ts) {
+  variants <- ts$variants
+  if (is.function(variants)) {
+    variants()
+  } else {
+    variants
+  }
+}
+
 extract_macs_chr <- function(macs_out, chr = 1L, nThreads = 1L) {
   pos <- as.numeric(macs_out$genMap[[chr]])
   n_sites <- length(pos)
@@ -22,8 +40,8 @@ extract_macs_chr <- function(macs_out, chr = 1L, nThreads = 1L) {
 extract_ts_chr <- function(tc_xptr) {
   tc <- RcppTskit::TableCollection$new(xptr = tc_xptr)
   ts <- tc$tree_sequence()
-  n_samples <- as.integer(ts$num_samples())
-  it <- ts$variants()
+  n_samples <- as.integer(ts_get(ts, "num_samples"))
+  it <- ts_variants_iterator(ts)
   pos <- numeric(0)
   cols <- list()
   repeat {
@@ -322,4 +340,3 @@ test_that("MaCSTS validates key inputs", {
     "Nref must be positive when provided"
   )
 })
-
