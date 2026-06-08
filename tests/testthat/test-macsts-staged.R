@@ -20,13 +20,31 @@ ts_variants_iterator <- function(ts) {
   }
 }
 
+ts_next_variant <- function(it) {
+  if ("next_variant" %in% ls(it)) {
+    nxt <- it[["next_variant"]]
+    if (is.function(nxt)) {
+      return(nxt())
+    }
+    return(nxt)
+  }
+  if ("next" %in% ls(it)) {
+    nxt <- it[["next"]]
+    if (is.function(nxt)) {
+      return(nxt())
+    }
+    return(nxt)
+  }
+  stop("Variant iterator has neither 'next_variant' nor 'next'")
+}
+
 ts_variant_keys <- function(tc_xptr) {
   tc <- RcppTskit::TableCollection$new(xptr = tc_xptr)
   ts <- tc$tree_sequence()
   it <- ts_variants_iterator(ts)
   keys <- character(0)
   repeat {
-    v <- it$next_variant()
+    v <- ts_next_variant(it)
     if (is.null(v)) {
       break
     }

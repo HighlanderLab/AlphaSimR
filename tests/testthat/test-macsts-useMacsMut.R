@@ -22,6 +22,24 @@ ts_variants_iterator <- function(ts) {
   }
 }
 
+ts_next_variant <- function(it) {
+  if ("next_variant" %in% ls(it)) {
+    nxt <- it[["next_variant"]]
+    if (is.function(nxt)) {
+      return(nxt())
+    }
+    return(nxt)
+  }
+  if ("next" %in% ls(it)) {
+    nxt <- it[["next"]]
+    if (is.function(nxt)) {
+      return(nxt())
+    }
+    return(nxt)
+  }
+  stop("Variant iterator has neither 'next_variant' nor 'next'")
+}
+
 extract_macs_chr <- function(macs_out, chr = 1L, nThreads = 1L) {
   pos <- as.numeric(macs_out$genMap[[chr]])
   n_sites <- length(pos)
@@ -45,7 +63,7 @@ extract_ts_chr <- function(tc_xptr) {
   pos <- numeric(0)
   cols <- list()
   repeat {
-    v <- it$next_variant()
+    v <- ts_next_variant(it)
     if (is.null(v)) {
       break
     }
@@ -60,8 +78,8 @@ extract_ts_chr <- function(tc_xptr) {
   list(
     pos = pos,
     hap = hap,
-    num_sites = as.integer(ts$num_sites()),
-    num_mutations = as.integer(ts$num_mutations())
+    num_sites = as.integer(ts_get(ts, "num_sites")),
+    num_mutations = as.integer(ts_get(ts, "num_mutations"))
   )
 }
 
