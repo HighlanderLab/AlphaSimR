@@ -15,6 +15,7 @@
   femaleParentPop = NULL,
   maleParentPop = NULL,
   hist = NULL,
+  histGen = NULL,
   simParam = NULL,
   nThreads = NULL,
   ...

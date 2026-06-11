@@ -3,12 +3,12 @@
 \docType{class}
 \name{MapPop-class}
 \alias{MapPop-class}
-\alias{[,MapPop-method}
+\alias{[,MapPop,ANY,ANY,ANY-method}
 \alias{c,MapPop-method}
 \alias{isMapPop}
 \title{Raw population with genetic map}
 \usage{
-\S4method{[}{MapPop}(x, i)
+\S4method{[}{MapPop,ANY,ANY,ANY}(x, i)
 
 \S4method{c}{MapPop}(x, ...)
 
@@ -29,7 +29,7 @@ for creating initial populations and setting traits in the
 }
 \section{Methods (by generic)}{
 \itemize{
-\item \code{[}: Extract MapPop by index
+\item \code{x[i}: Extract MapPop by index
 
 \item \code{c(MapPop)}: Combine multiple MapPops
 
