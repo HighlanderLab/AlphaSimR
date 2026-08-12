@@ -231,6 +231,95 @@ test_that("usePhysicalPositions changes coordinate scale while keeping sampled o
   expect_true(isTRUE(all.equal(out_unit$pop@genMap[[1]], out_bp$pop@genMap[[1]], tolerance = 1e-12)))
 })
 
+test_that("runMacTSBridgeChrInfo reuses runMacTS map metadata", {
+  out <- AlphaSimR:::runMacTS(
+    nInd = 4,
+    nChr = 2,
+    segSites = c(40L, 40L),
+    inbred = FALSE,
+    ploidy = 2L,
+    species = "GENERIC",
+    mutationMode = "postTs",
+    usePhysicalPositions = TRUE,
+    nThreads = 1L,
+    seed = as.integer(c(123, 456)),
+    mutSeed = as.integer(c(789, 987)),
+    siteSamplingSeed = 42L,
+    returnTs = TRUE
+  )
+  out_dir <- tempfile("mac_bridge_chr_info_")
+  chr_info <- AlphaSimR:::runMacTSBridgeChrInfo(out, out_dir = out_dir)
+
+  pos_meta <- attr(out$pop, "tsForwardPosMeta", exact = TRUE)
+
+  expect_length(chr_info, 2L)
+  expect_true(all(file.exists(vapply(chr_info, `[[`, character(1), "ts_path"))))
+  expect_equal(lapply(chr_info, `[[`, "breaks"), pos_meta$breaksList)
+  expect_equal(lapply(chr_info, `[[`, "rates"), pos_meta$ratesList)
+  expect_equal(vapply(chr_info, `[[`, integer(1), "segSites"), out$pop@nLoci)
+})
+
+test_that("runMacTS converts MaCS -R hotspot file into breaks/rates metadata", {
+  hotspot_path <- tempfile("macs_hotspot_", fileext = ".txt")
+  writeLines("0.25 0.5 3", hotspot_path)
+  on.exit(unlink(hotspot_path, force = TRUE), add = TRUE)
+
+  out <- AlphaSimR:::runMacTS(
+    nInd = 4,
+    nChr = 1,
+    segSites = 30L,
+    inbred = FALSE,
+    ploidy = 2L,
+    manualCommand = paste("1e5 -t 1e-3 -r 4e-6 -R", hotspot_path),
+    manualGenLen = 1,
+    mutationMode = "postTs",
+    usePhysicalPositions = FALSE,
+    nThreads = 1L,
+    seed = as.integer(321),
+    mutSeed = as.integer(654),
+    siteSamplingSeed = 42L,
+    returnTs = TRUE
+  )
+
+  pos_meta <- attr(out$pop, "tsForwardPosMeta", exact = TRUE)
+  expect_equal(pos_meta$breaksList[[1L]], c(0, 0.25, 0.5, 1))
+  expect_equal(pos_meta$ratesList[[1L]], c(1, 3, 1))
+})
+
+test_that("runMacs genMap conversion uses MaCS -R hotspot map", {
+  hotspot_path <- tempfile("macs_hotspot_", fileext = ".txt")
+  writeLines("0.25 0.5 3", hotspot_path)
+  on.exit(unlink(hotspot_path, force = TRUE), add = TRUE)
+
+  macs_pos <- list(c(0.10, 0.30, 0.60, 0.90))
+  manual_command <- paste("1e5 -t 1e-3 -r 4e-6 -R", hotspot_path)
+  out <- AlphaSimR:::.runMacsGenMapFromMacs(
+    macsGenMap = macs_pos,
+    genLen = 1,
+    manualCommand = manual_command
+  )
+
+  expected <- AlphaSimR:::rateMap2cumMorgan(
+    macs_pos[[1]],
+    breaks = c(0, 0.25, 0.5, 1),
+    rates = c(1, 3, 1)
+  )
+  expected <- expected - expected[[1L]]
+
+  expect_equal(unname(out[[1]]), expected, tolerance = 1e-12)
+  expect_identical(names(out[[1]]), paste(1, seq_along(macs_pos[[1]]), sep = "_"))
+})
+
+test_that("asMapPop requires breaks/rates for external tree input", {
+  ts_path <- testthat::test_path("..", "..", "dev", "testData", "msprime_chr0.trees")
+  skip_if(!file.exists(ts_path), "Missing test fixture dev/testData/msprime_chr0.trees")
+
+  expect_error(
+    AlphaSimR:::asMapPop(chr_info = list(list(ts_path = ts_path, segSites = 10L))),
+    regexp = "breaks.*rates|rates.*breaks"
+  )
+})
+
 test_that("Nref rescales TS times in runMacTS ancestry-only mode", {
   seed <- as.integer(42)
   nref <- 10000

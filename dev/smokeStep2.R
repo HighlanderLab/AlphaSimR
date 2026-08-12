@@ -66,15 +66,16 @@ gm[[111]]
 gm[[112]]
 
 
+pos_list <- attr(founderGenomes1, "tsForwardPosMeta", exact = TRUE)$posList
 # for RecHist
-# bridgeSegDfList store the indexes of SNPs after recombination events
-bridgeCollectSegFromSimOutput(SP, simOutput)
+bridgeSegDfList <- bridgeCollectSegFromSimOutput(SP, simOutput, pos_list = pos_list)
 # for RecHistGen
-# bridgeSegDfListGen store the positions of where recombination happen
-bridgeCollectSegGenFromSimOutput(SP, simOutput)
+bridgeSegDfListGen <- bridgeCollectSegGenFromSimOutput(
+  SP, simOutput, chr_info = chr_info, pos_list = pos_list
+)
 
 # for RecHist
-edgeDf <- bridgeAllSegToEdgeDf(chr_info)
+edgeDf <- bridgeAllSegToEdgeDf(chr_info, bridgeSegDfList, pos_list = pos_list)
 bridgeWriteTrees(chr_info, edgeDf, SP)
 # load the tree in Python...
 #origin = tskit.load('/Users/jliang2/R_scripts/AlphaSimR_test/dev/testData/msprime_chr0.trees')
@@ -153,6 +154,5 @@ out <- data.frame(
 )
 
 out
-
 
 

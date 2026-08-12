@@ -248,6 +248,87 @@ finalizeInbredTs <- function(x, inbred = FALSE, ploidy = 2L) {
   list(command = command, genLen = as.numeric(genLen), seqLen = seqLen)
 }
 
+.runMacTS_hotspot_path <- function(args) {
+  tokens <- strsplit(as.character(args), "[,[:space:]]+", perl = TRUE)[[1L]]
+  tokens <- tokens[nzchar(tokens)]
+  idx <- match("-R", tokens)
+  if (is.na(idx) || idx >= length(tokens)) {
+    return(NULL)
+  }
+  tokens[[idx + 1L]]
+}
+
+.runMacTS_read_hotspot_map <- function(path) {
+  if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)) {
+    stop("Invalid MaCS -R hotspot file path", call. = FALSE)
+  }
+  if (!file.exists(path)) {
+    stop("MaCS -R hotspot file does not exist: ", path, call. = FALSE)
+  }
+  hot <- utils::read.table(path, header = FALSE, col.names = c("start", "end", "ratio"))
+  if (ncol(hot) != 3L || nrow(hot) == 0L) {
+    stop("MaCS -R hotspot file must contain rows of: start end ratio", call. = FALSE)
+  }
+  hot$start <- as.numeric(hot$start)
+  hot$end <- as.numeric(hot$end)
+  hot$ratio <- as.numeric(hot$ratio)
+  bad <- !is.finite(hot$start) | !is.finite(hot$end) | !is.finite(hot$ratio) |
+    hot$start < 0 | hot$end > 1 | hot$start >= hot$end | hot$ratio < 0
+  if (any(bad)) {
+    stop("Invalid MaCS -R hotspot row. Expected 0 <= start < end <= 1 and ratio >= 0.", call. = FALSE)
+  }
+  hot <- hot[order(hot$start, hot$end), , drop = FALSE]
+  if (nrow(hot) > 1L && any(hot$start[-1L] < hot$end[-nrow(hot)])) {
+    stop("Overlapping MaCS -R hotspot intervals are not supported", call. = FALSE)
+  }
+  hot
+}
+
+.runMacTS_map_from_hotspots <- function(path, nChr, seqLen, genLen, usePhysicalPositions) {
+  hot <- .runMacTS_read_hotspot_map(path)
+  coordLen <- if (isTRUE(usePhysicalPositions)) as.numeric(seqLen) else 1
+  starts <- coordLen * hot$start
+  ends <- coordLen * hot$end
+  recBreaks <- sort(unique(c(0, coordLen, starts, ends)))
+  ratio <- rep(1, length(recBreaks) - 1L)
+  for (i in seq_len(nrow(hot))) {
+    idx <- recBreaks[-length(recBreaks)] >= starts[[i]] & recBreaks[-1L] <= ends[[i]]
+    ratio[idx] <- hot$ratio[[i]]
+  }
+  recRates <- lapply(as.numeric(genLen), function(g) {
+    (g / coordLen) * ratio
+  })
+  list(
+    breaks = rep(list(recBreaks), as.integer(nChr)),
+    rates = recRates
+  )
+}
+
+.runMacTS_resolve_rec_map <- function(args, nChr, seqLen, genLen, usePhysicalPositions) {
+  hotspotPath <- .runMacTS_hotspot_path(args)
+  if (!is.null(hotspotPath)) {
+    return(.runMacTS_map_from_hotspots(
+      path = hotspotPath,
+      nChr = nChr,
+      seqLen = seqLen,
+      genLen = genLen,
+      usePhysicalPositions = usePhysicalPositions
+    ))
+  }
+
+  recBreaks <- if (usePhysicalPositions) {
+    rep(list(c(0, seqLen)), nChr)
+  } else {
+    rep(list(c(0, 1)), nChr)
+  }
+  recRates <- if (usePhysicalPositions) {
+    lapply(genLen, function(g) c(g / seqLen))
+  } else {
+    lapply(genLen, function(g) c(g))
+  }
+  list(breaks = recBreaks, rates = recRates)
+}
+
 #' High-level TS wrapper parallel to runMacs
 #'
 #' @param nInd Integer number of individuals to simulate.
@@ -403,22 +484,19 @@ runMacTS <- function(nInd, nChr = 1, segSites = NULL, inbred = FALSE,
          ". Increase mutation rate or inspect TS via returnTs=TRUE.")
   }
   
-  breaks <- if (usePhysicalPositions) {
-    rep(list(c(0, seqLen)), nChr)
-  } else {
-    rep(list(c(0, 1)), nChr)
-  }
-  rates <- if (usePhysicalPositions) {
-    lapply(genLen, function(g) c(g / seqLen))
-  } else {
-    lapply(genLen, function(g) c(g))
-  }
+  recMap <- .runMacTS_resolve_rec_map(
+    args = args,
+    nChr = nChr,
+    seqLen = seqLen,
+    genLen = genLen,
+    usePhysicalPositions = usePhysicalPositions
+  )
   
   popOut <- asMapPop(
     chr_info = list(
       tables = runOut$tables,
-      breaks = breaks,
-      rates = rates
+      breaks = recMap$breaks,
+      rates = recMap$rates
     ),
     ploidy = ploidy,
     inbred = inbred,
@@ -442,4 +520,91 @@ runMacTS <- function(nInd, nChr = 1, segSites = NULL, inbred = FALSE,
     timeScale = if (!is.null(runOut$timeScale)) runOut$timeScale else 1,
     Nref = if (!is.null(runOut$Nref)) runOut$Nref else NA_real_
   )
+}
+
+#' Build file-backed bridge chromosome info from a runMacTS result
+#'
+#' `runMacTS(..., returnTs = TRUE)` keeps founder tables in memory, while the
+#' old bridge validation path expects `chr_info[[cc]]$ts_path`. This helper
+#' writes those tables to `.trees` files and reuses the map metadata stored by
+#' `asMapPop()`.
+#'
+#' @param x List returned by `runMacTS(..., returnTs = TRUE)`.
+#' @param out_dir Directory where founder `.trees` files should be written.
+#' @param out_basename Prefix for written founder tree files.
+#' @param segSites Optional scalar or per-chromosome site counts for returned
+#'   `chr_info`. Defaults to `x$pop@nLoci`.
+#'
+#' @return List of chromosome info entries with `ts_path`, `breaks`, `rates`,
+#'   and `segSites`.
+#' @keywords internal
+#' @noRd
+runMacTSBridgeChrInfo <- function(x, out_dir, out_basename = "runMacTS_founder",
+                                  segSites = NULL) {
+  if (!is.list(x) || is.null(x$pop) || is.null(x$tables)) {
+    stop("x must be the list returned by runMacTS(..., returnTs = TRUE)", call. = FALSE)
+  }
+  pop <- x$pop
+  tables <- x$tables
+  if (!is(pop, "MapPop") && !is(pop, "Pop")) {
+    stop("x$pop must be a Pop or MapPop object", call. = FALSE)
+  }
+  if (!is.list(tables) || length(tables) == 0L) {
+    stop("x$tables must be a non-empty list of table collection pointers", call. = FALSE)
+  }
+  nChr <- length(tables)
+  if (pop@nChr != nChr) {
+    stop("length(x$tables) must match x$pop@nChr", call. = FALSE)
+  }
+  if (!is.character(out_dir) || length(out_dir) != 1L || is.na(out_dir) || !nzchar(out_dir)) {
+    stop("out_dir must be a non-empty character scalar", call. = FALSE)
+  }
+  if (!is.character(out_basename) || length(out_basename) != 1L ||
+      is.na(out_basename) || !nzchar(out_basename)) {
+    stop("out_basename must be a non-empty character scalar", call. = FALSE)
+  }
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  if (!dir.exists(out_dir)) {
+    stop("Failed to create out_dir: ", out_dir, call. = FALSE)
+  }
+
+  posMeta <- attr(pop, "tsForwardPosMeta", exact = TRUE)
+  if (is.null(posMeta) || is.null(posMeta$posList) || length(posMeta$posList) != nChr ||
+      is.null(posMeta$breaksList) || length(posMeta$breaksList) != nChr ||
+      is.null(posMeta$ratesList) || length(posMeta$ratesList) != nChr) {
+    stop("x$pop is missing TS position metadata from asMapPop()", call. = FALSE)
+  }
+  if (length(pop@genMap) != nChr) {
+    stop("x$pop@genMap length must match x$pop@nChr", call. = FALSE)
+  }
+
+  if (is.null(segSites)) {
+    segSites <- as.integer(pop@nLoci)
+  } else {
+    segSites <- as.integer(segSites)
+  }
+  if (length(segSites) == 1L) {
+    segSites <- rep(segSites, nChr)
+  }
+  if (length(segSites) != nChr || any(is.na(segSites)) || any(segSites < 0L)) {
+    stop("segSites must have length 1 or number of chromosomes", call. = FALSE)
+  }
+
+  lapply(seq_len(nChr), function(cc) {
+    tc <- RcppTskit::TableCollection$new(xptr = tables[[cc]])
+    seqLen <- as.numeric(tc$sequence_length())
+    if (!is.finite(seqLen) || seqLen <= 0) {
+      stop("Invalid sequence length for chromosome ", cc, call. = FALSE)
+    }
+
+    tsPath <- file.path(out_dir, paste0(out_basename, "_chr", cc - 1L, ".trees"))
+    tc$tree_sequence()$dump(tsPath)
+
+    list(
+      ts_path = tsPath,
+      breaks = as.numeric(posMeta$breaksList[[cc]]),
+      rates = as.numeric(posMeta$ratesList[[cc]]),
+      segSites = segSites[[cc]]
+    )
+  })
 }

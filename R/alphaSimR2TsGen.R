@@ -1,5 +1,3 @@
-library(jsonlite)
-
 morgan2bpRate <- function(m, x0, breaks, rates, side=c("left","right")) {
   # turn breaks into Morgan
   segLen <- diff(breaks)
@@ -33,8 +31,6 @@ morgan2bpRate <- function(m, x0, breaks, rates, side=c("left","right")) {
 
 }
 
-
-
 recHistGenMatToSegDf <- function(histMat, x0, breaks, rates, seqLen) {
 
   origin <- as.integer(histMat[, 1])
@@ -61,7 +57,7 @@ recHistGenMatToSegDf <- function(histMat, x0, breaks, rates, seqLen) {
   )
 }
 
-recHistGenToSegDfWithParents <- function(SP, offspringPop) {
+recHistGenToSegDfWithParents <- function(SP, offspringPop, chr_info, pos_list) {
   childIds <- offspringPop@id
   ped <- SP$pedigree[childIds, , drop = FALSE]
 
@@ -70,17 +66,20 @@ recHistGenToSegDfWithParents <- function(SP, offspringPop) {
 
   for (childId in childIds) {
     x <- SP$recHistGen[[childId]]
+    if (is.null(x) || length(x) == 0L) {
+      next
+    }
 
     motherId <- ped[childId, "mother"]
     fatherId <- ped[childId, "father"]
 
     for (cc in seq_along(x)) {
-      tc <- tc_load(chr_info[[cc]]$ts_path)
+      tc <- RcppTskit::tc_load(chr_info[[cc]]$ts_path)
       seqLen <- as.numeric(tc$sequence_length())
       breaks <- chr_info[[cc]]$breaks
       rates <- chr_info[[cc]]$rates
 
-      x0 <- chrKeptPosBpList[[cc]][1]
+      x0 <- pos_list[[cc]][1]
 
       haps <- as.vector(x[[cc]])
       nHap <- length(haps)
@@ -106,16 +105,36 @@ recHistGenToSegDfWithParents <- function(SP, offspringPop) {
     }
   }
 
+  if (length(out) == 0L) {
+    return(data.frame(
+      childId = integer(),
+      hap = integer(),
+      chr = integer(),
+      left = numeric(),
+      right = numeric(),
+      parentId = integer(),
+      parentHap = integer(),
+      parentGlobalHapId = integer(),
+      stringsAsFactors = FALSE
+    ))
+  }
   do.call(rbind, out)
 }
 
-bridgeCollectSegGenFromSimOutput <- function(SP, simOutput) {
-  bridgeSegDfListGen <<- list()
+bridgeCollectSegGenFromSimOutput <- function(SP, simOutput, chr_info, pos_list) {
+  out <- list()
 
-  for (k in 2:length(simOutput)) {
-    segDf <- recHistGenToSegDfWithParents(SP, simOutput[[k]])
-    bridgeSegDfListGen[[length(bridgeSegDfListGen) + 1]] <<- segDf
+  if (length(simOutput) >= 2L) {
+    for (k in seq.int(2L, length(simOutput))) {
+      segDf <- recHistGenToSegDfWithParents(
+        SP = SP,
+        offspringPop = simOutput[[k]],
+        chr_info = chr_info,
+        pos_list = pos_list
+      )
+      out[[length(out) + 1L]] <- segDf
+    }
   }
 
-  invisible(bridgeSegDfListGen)
+  invisible(out)
 }

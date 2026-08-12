@@ -112,7 +112,7 @@ SimParam = R6Class(
       private$.isTrackRec = FALSE
       private$.recHist = list()
       private$.isTrackRecGen = FALSE
-      private$.recHistGen = list() # Jinyang added
+      private$.recHistGen = list()
       private$.varA = numeric()
       private$.varG = numeric()
       private$.varE = numeric()
@@ -189,7 +189,7 @@ SimParam = R6Class(
       invisible(self)
     },
 
-    #' @description Sets genetic-coordinate recombination tracking for the simulation. Jinyang added.
+    #' @description Sets genetic-coordinate recombination tracking for the simulation.
     #' By default this is turned off. When turned on, it will also turn on pedigree tracking.
     #'
     #' @param isTrackRecGen should genetic-coordinate recombination tracking be on.
@@ -203,6 +203,32 @@ SimParam = R6Class(
       if(isTrackRecGen){
         private$.isTrackPed = TRUE
         private$.isTrackRec = TRUE
+      }
+      invisible(self)
+    },
+
+    #' @description Sets forward tree-sequence tracking on/off.
+    #' When enabled, this also enables genetic-coordinate recombination
+    #' tracking and can initialize the forward TS recorder immediately.
+    #'
+    #' @param isTrackTs should forward tree-sequence tracking be on.
+    #' @param founderPop founder/sample population used to seed TS node maps.
+    #' Required on enable if no recorder is already attached.
+    #' @param force should the check for a running simulation be ignored.
+    setTrackTs = function(isTrackTs, founderPop=NULL, force=FALSE){
+      stopifnot(is.logical(isTrackTs), length(isTrackTs)==1L, !is.na(isTrackTs))
+      if(isTRUE(isTrackTs)){
+        self$setTrackRecGen(TRUE, force=TRUE)
+        hasRecorder = !is.null(.tsForwardGetRecorder(self))
+        if(is.null(founderPop)){
+          if(!hasRecorder){
+            stop("setTrackTs(TRUE) requires founderPop when no recorder is attached", call. = FALSE)
+          }
+        } else {
+          tsForwardInitOnSimParam(self, founderPop=founderPop)
+        }
+      }else{
+        .tsForwardSetRecorder(self, NULL)
       }
       invisible(self)
     },
@@ -238,7 +264,6 @@ SimParam = R6Class(
       if(private$.isTrackRec){
         private$.recHist = private$.recHist[0:lastId]
       }
-      # Jinyang added
       if(private$.isTrackRecGen){
         private$.recHistGen = private$.recHistGen[0:lastId]
       }
@@ -2168,7 +2193,7 @@ SimParam = R6Class(
     #' @param ploidy ploidy level
     addToRec = function(lastId,id,mother,father,isDH,
                         hist,
-                        histGen=NULL, # Jinyang added
+                        histGen=NULL,
                         ploidy){
       nNewInd = lastId-private$.lastId
       stopifnot(nNewInd>0)
@@ -2181,6 +2206,8 @@ SimParam = R6Class(
                 length(isDH)==nNewInd)
       tmp = cbind(mother,father,isDH)
       rownames(tmp) = id
+      keepRecHistGen = isTRUE(getOption("AlphaSimR.tsForwardKeepRecHistGen", FALSE))
+      storeRecHistGen = keepRecHistGen
       if(is.null(hist)){
         newRecHist = vector("list",nNewInd)
         tmpLastHaplo = private$.lastHaplo
@@ -2201,11 +2228,14 @@ SimParam = R6Class(
         private$.recHist = c(private$.recHist, newRecHist)
         private$.lastHaplo = tmpLastHaplo
 
-        # Jinyang added
         if(private$.isTrackRecGen){
-          #newRecHistGen = vector("list", nNewInd)
-          #names(newRecHistGen) = id
-          private$.recHistGen = c(private$.recHistGen, newRecHist)
+          if(storeRecHistGen){
+            private$.recHistGen = c(private$.recHistGen, newRecHist)
+          }else{
+            emptyRecHistGen = vector("list", nNewInd)
+            names(emptyRecHistGen) = id
+            private$.recHistGen = c(private$.recHistGen, emptyRecHistGen)
+          }
         }
       }else{
         # Add hist to recombination history
@@ -2213,10 +2243,18 @@ SimParam = R6Class(
         private$.isFounder = c(private$.isFounder, rep(FALSE, nNewInd))
         names(hist) = id
         private$.recHist = c(private$.recHist, hist)
-        # Jinyang added
         if(private$.isTrackRecGen){
-          names(histGen) = id
-          private$.recHistGen = c(private$.recHistGen, histGen)
+          if(storeRecHistGen){
+            if(is.null(histGen)){
+              histGen = vector("list", nNewInd)
+            }
+            names(histGen) = id
+            private$.recHistGen = c(private$.recHistGen, histGen)
+          }else{
+            emptyRecHistGen = vector("list", nNewInd)
+            names(emptyRecHistGen) = id
+            private$.recHistGen = c(private$.recHistGen, emptyRecHistGen)
+          }
         }
       }
       private$.pedigree = rbind(private$.pedigree, tmp)
@@ -2333,7 +2371,7 @@ SimParam = R6Class(
     .isTrackRec="logical",
     .recHist="list",
     .isTrackRecGen = "logical",
-    .recHistGen = "list", #Jinyang added
+    .recHistGen = "list",
     .varA="numeric",
     .varG="numeric",
     .varE="numeric",
@@ -2777,7 +2815,7 @@ SimParam = R6Class(
       }
     },
 
-    #' @field isTrackRecGen is recombination being tracked. Jinyang added.
+    #' @field isTrackRecGen is genetic-coordinate recombination being tracked.
     isTrackRecGen = function(value){
       if(missing(value)){
         private$.isTrackRecGen
@@ -2786,7 +2824,7 @@ SimParam = R6Class(
       }
     },
 
-    #' @field recHistGen list of historic recombination events. Jinyang added.
+    #' @field recHistGen list of historic genetic-coordinate recombination events.
     recHistGen = function(value){
       if(missing(value)){
         private$.recHistGen

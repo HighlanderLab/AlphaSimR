@@ -292,8 +292,8 @@ createIbdMat <- function(ibd, chr, nLoci, ploidy, nThreads) {
     .Call(`_AlphaSimR_createIbdMat`, ibd, chr, nLoci, ploidy, nThreads)
 }
 
-cross <- function(motherGeno, mother, fatherGeno, father, femaleMap, maleMap, trackRec, motherPloidy, fatherPloidy, v, p, motherCentromere, fatherCentromere, quadProb, nThreads, trackRecGen) {
-    .Call(`_AlphaSimR_cross`, motherGeno, mother, fatherGeno, father, femaleMap, maleMap, trackRec, motherPloidy, fatherPloidy, v, p, motherCentromere, fatherCentromere, quadProb, nThreads, trackRecGen)
+cross <- function(motherGeno, mother, fatherGeno, father, femaleMap, maleMap, trackRec, motherPloidy, fatherPloidy, v, p, motherCentromere, fatherCentromere, quadProb, nThreads, trackRecGen, returnRecHistGen, recordTsDirect, returnTsSegGen, directAppendFnSEXP) {
+    .Call(`_AlphaSimR_cross`, motherGeno, mother, fatherGeno, father, femaleMap, maleMap, trackRec, motherPloidy, fatherPloidy, v, p, motherCentromere, fatherCentromere, quadProb, nThreads, trackRecGen, returnRecHistGen, recordTsDirect, returnTsSegGen, directAppendFnSEXP)
 }
 
 createDH2 <- function(geno, nDH, genMap, v, p, trackRec, nThreads) {
@@ -436,5 +436,21 @@ tsMutateTableCollection <- function(tc, theta, seed) {
 
 tsFinalizeInbredTableCollection <- function(tc, ploidy) {
     invisible(.Call(`_AlphaSimR_tsFinalizeInbredTableCollection`, tc, ploidy))
+}
+
+tsForwardNodeTableAddRows <- function(tc, flags, time, population, individual) {
+    .Call(`_AlphaSimR_tsForwardNodeTableAddRows`, tc, flags, time, population, individual)
+}
+
+tsForwardNodeTableAddRowsWithMetadata <- function(tc, flags, time, population, individual, nodeKey) {
+    .Call(`_AlphaSimR_tsForwardNodeTableAddRowsWithMetadata`, tc, flags, time, population, individual, nodeKey)
+}
+
+tsForwardEdgeTableAddRows <- function(tc, left, right, parent, child) {
+    invisible(.Call(`_AlphaSimR_tsForwardEdgeTableAddRows`, tc, left, right, parent, child))
+}
+
+tsForwardSetSampleFlags <- function(tc, samples, clearExisting = TRUE) {
+    invisible(.Call(`_AlphaSimR_tsForwardSetSampleFlags`, tc, samples, clearExisting))
 }
 

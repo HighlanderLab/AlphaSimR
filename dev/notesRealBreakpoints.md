@@ -105,16 +105,17 @@ can check it with genMap (SNP index -\> SNP position in Morgan):
 
 ### Collect information for ts tables
 
+    pos_list <- attr(founderGenomes1, "tsForwardPosMeta", exact = TRUE)$posList
     # for RecHist
-    # bridgeSegDfList store the indexes of SNPs after recombination events
-    bridgeCollectSegFromSimOutput(SP, simOutput)
+    bridgeSegDfList <- bridgeCollectSegFromSimOutput(SP, simOutput, pos_list = pos_list)
     # for RecHistGen
-    # bridgeSegDfListGen store the positions of where recombination happen
-    bridgeCollectSegGenFromSimOutput(SP, simOutput)
+    bridgeSegDfListGen <- bridgeCollectSegGenFromSimOutput(
+      SP, simOutput, chr_info = chr_info, pos_list = pos_list
+    )
 
 For RecHist, the indexes of SNPs have to be turned into positions:
 
-    edgeDf <- bridgeAllSegToEdgeDf(chr_info)
+    edgeDf <- bridgeAllSegToEdgeDf(chr_info, bridgeSegDfList, pos_list = pos_list)
 
 ### Write tree files and check
 
@@ -182,8 +183,8 @@ The new individuals added:
 
 ![](../man/figures/addInd.png)
 
-For RecHistGen, the positions were stored in bridgeSegDfListGen and can
-be directly used:
+For RecHistGen, the returned segment list stores physical breakpoints
+and can be directly used:
 
     bridgeWriteTrees(chr_info, do.call(rbind, bridgeSegDfListGen), SP)
 

@@ -82,6 +82,14 @@ makeCross = function(pop, crossPlan, nProgeny=1,
                       rep(crossPlan[,2], times=nProgeny))
   }
   
+  tsForward = .setupTsForwardCross(
+    simParam = simParam,
+    crossPlan = crossPlan,
+    motherIid = pop@iid,
+    fatherIid = pop@iid,
+    femaleMap = simParam$femaleMap,
+    maleMap = simParam$maleMap
+  )
   tmp = cross(pop@geno,
               crossPlan[,1],
               pop@geno,
@@ -97,7 +105,11 @@ makeCross = function(pop, crossPlan, nProgeny=1,
               simParam$maleCentromere,
               simParam$quadProb,
               nThreads,
-              simParam$isTrackRecGen)
+              simParam$isTrackRecGen,
+              tsForward$keepRecHistGen,
+              tsForward$useTsDirect,
+              tsForward$returnTsSegGen,
+              tsForward$directAppendFn)
   
   dim(tmp$geno) = NULL # Account for matrix bug in RcppArmadillo
   
@@ -113,23 +125,31 @@ makeCross = function(pop, crossPlan, nProgeny=1,
   }else{
     hist = NULL
   }
-  # Jinyang added
-  if(simParam$isTrackRecGen){
-    histGen = tmp$recHistGen
-  } else {
-    histGen = NULL
-  }
-  return(.newPop(rawPop=rPop,
-                 mother=pop@id[crossPlan[,1]],
-                 father=pop@id[crossPlan[,2]],
-                 iMother=pop@iid[crossPlan[,1]],
-                 iFather=pop@iid[crossPlan[,2]],
-                 femaleParentPop=pop,
-                 maleParentPop=pop,
-                 hist=hist,
-                 histGen=histGen, # Jinyang added
-                 simParam=simParam,
-                 nThreads=nThreads))
+  recGen = .extractTsCrossRecGen(tmp, simParam, tsForward$keepRecHistGen)
+  histGen = recGen$histGen
+  tsSegGenRaw = recGen$tsSegGenRaw
+  outPop = .newPop(rawPop=rPop,
+                   mother=pop@id[crossPlan[,1]],
+                   father=pop@id[crossPlan[,2]],
+                   iMother=pop@iid[crossPlan[,1]],
+                   iFather=pop@iid[crossPlan[,2]],
+                   femaleParentPop=pop,
+                   maleParentPop=pop,
+                   hist=hist,
+                   histGen=histGen,
+                   simParam=simParam,
+                   nThreads=nThreads)
+  outPop = .finalizeTsForwardCross(
+    outPop = outPop,
+    tsSegGenRaw = tsSegGenRaw,
+    recorderAppended = isTRUE(tsForward$useTsDirect),
+    childIidPred = tsForward$childIidPred,
+    femalePop = pop,
+    malePop = pop,
+    femaleMap = simParam$femaleMap,
+    maleMap = simParam$maleMap
+  )
+  return(outPop)
 }
 
 #' @title Make random crosses
@@ -428,6 +448,14 @@ makeCross2 = function(females, males, crossPlan, nProgeny=1, simParam=NULL,
                       rep(crossPlan[,2], times=nProgeny))
   }
   
+  tsForward = .setupTsForwardCross(
+    simParam = simParam,
+    crossPlan = crossPlan,
+    motherIid = females@iid,
+    fatherIid = males@iid,
+    femaleMap = simParam$femaleMap,
+    maleMap = simParam$maleMap
+  )
   tmp=cross(females@geno,
             crossPlan[,1],
             males@geno,
@@ -443,7 +471,11 @@ makeCross2 = function(females, males, crossPlan, nProgeny=1, simParam=NULL,
             simParam$maleCentromere,
             simParam$quadProb,
             nThreads,
-            simParam$isTrackRecGen) # Jinyang added
+            simParam$isTrackRecGen,
+            tsForward$keepRecHistGen,
+            tsForward$useTsDirect,
+            tsForward$returnTsSegGen,
+            tsForward$directAppendFn)
   
   dim(tmp$geno) = NULL # Account for matrix bug in RcppArmadillo
   
@@ -459,24 +491,31 @@ makeCross2 = function(females, males, crossPlan, nProgeny=1, simParam=NULL,
   }else{
     hist = NULL
   }
-  # Jinyang added
-  if(simParam$isTrackRecGen){
-    histGen = tmp$recHistGen
-  } else {
-    histGen = NULL
-  }
-
-  return(.newPop(rawPop=rPop,
-                 mother=females@id[crossPlan[,1]],
-                 father=males@id[crossPlan[,2]],
-                 iMother=females@iid[crossPlan[,1]],
-                 iFather=males@iid[crossPlan[,2]],
-                 femaleParentPop=females,
-                 maleParentPop=males,
-                 hist=hist,
-                 histGen=histGen, # Jinyang added
-                 simParam=simParam,
-                 nThreads=nThreads))
+  recGen = .extractTsCrossRecGen(tmp, simParam, tsForward$keepRecHistGen)
+  histGen = recGen$histGen
+  tsSegGenRaw = recGen$tsSegGenRaw
+  outPop = .newPop(rawPop=rPop,
+                   mother=females@id[crossPlan[,1]],
+                   father=males@id[crossPlan[,2]],
+                   iMother=females@iid[crossPlan[,1]],
+                   iFather=males@iid[crossPlan[,2]],
+                   femaleParentPop=females,
+                   maleParentPop=males,
+                   hist=hist,
+                   histGen=histGen,
+                   simParam=simParam,
+                   nThreads=nThreads)
+  outPop = .finalizeTsForwardCross(
+    outPop = outPop,
+    tsSegGenRaw = tsSegGenRaw,
+    recorderAppended = isTRUE(tsForward$useTsDirect),
+    childIidPred = tsForward$childIidPred,
+    femalePop = females,
+    malePop = males,
+    femaleMap = simParam$femaleMap,
+    maleMap = simParam$maleMap
+  )
+  return(outPop)
 }
 
 #' @title Make random crosses
@@ -677,6 +716,14 @@ self = function(pop, nProgeny=1, parents=NULL, keepParents=TRUE,
   
   crossPlan = cbind(crossPlan,crossPlan)
   
+  tsForward = .setupTsForwardCross(
+    simParam = simParam,
+    crossPlan = crossPlan,
+    motherIid = pop@iid,
+    fatherIid = pop@iid,
+    femaleMap = simParam$femaleMap,
+    maleMap = simParam$maleMap
+  )
   tmp = cross(pop@geno,
               crossPlan[,1],
               pop@geno,
@@ -692,7 +739,11 @@ self = function(pop, nProgeny=1, parents=NULL, keepParents=TRUE,
               simParam$maleCentromere,
               simParam$quadProb,
               nThreads,
-              simParam$isTrackRecGen) # Jinyang added
+              simParam$isTrackRecGen,
+              tsForward$keepRecHistGen,
+              tsForward$useTsDirect,
+              tsForward$returnTsSegGen,
+              tsForward$directAppendFn)
 
   dim(tmp$geno) = NULL # Account for matrix bug in RcppArmadillo
   
@@ -708,37 +759,36 @@ self = function(pop, nProgeny=1, parents=NULL, keepParents=TRUE,
   }else{
     hist = NULL
   }
-  # Jinyang added
-  if(simParam$isTrackRecGen){
-    histGen = tmp$recHistGen
-  } else {
-    histGen = NULL
-  }
-  if(keepParents){
-    return(.newPop(rawPop=rPop,
-                   mother=pop@mother[crossPlan[,1]],
-                   father=pop@father[crossPlan[,1]],
-                   iMother=pop@iid[crossPlan[,1]],
-                   iFather=pop@iid[crossPlan[,1]],
+  recGen = .extractTsCrossRecGen(tmp, simParam, tsForward$keepRecHistGen)
+  histGen = recGen$histGen
+  tsSegGenRaw = recGen$tsSegGenRaw
+  parentIdx = crossPlan[,1]
+  motherVals = if(keepParents) pop@mother[parentIdx] else pop@id[parentIdx]
+  fatherVals = if(keepParents) pop@father[parentIdx] else pop@id[parentIdx]
+  iParentVals = pop@iid[parentIdx]
+
+  outPop = .newPop(rawPop=rPop,
+                   mother=motherVals,
+                   father=fatherVals,
+                   iMother=iParentVals,
+                   iFather=iParentVals,
                    femaleParentPop=pop,
                    maleParentPop=pop,
                    hist=hist,
                    histGen=histGen,
                    simParam=simParam,
-                   nThreads=nThreads))
-  }else{
-    return(.newPop(rawPop=rPop,
-                   mother=pop@id[crossPlan[,1]],
-                   father=pop@id[crossPlan[,1]],
-                   iMother=pop@iid[crossPlan[,1]],
-                   iFather=pop@iid[crossPlan[,1]],
-                   femaleParentPop=pop,
-                   maleParentPop=pop,
-                   hist=hist,
-                   histGen=histGen,
-                   simParam=simParam,
-                   nThreads=nThreads))
-  }
+                   nThreads=nThreads)
+  outPop = .finalizeTsForwardCross(
+    outPop = outPop,
+    tsSegGenRaw = tsSegGenRaw,
+    recorderAppended = isTRUE(tsForward$useTsDirect),
+    childIidPred = tsForward$childIidPred,
+    femalePop = pop,
+    malePop = pop,
+    femaleMap = simParam$femaleMap,
+    maleMap = simParam$maleMap
+  )
+  return(outPop)
 }
 
 #' @title Generates DH lines

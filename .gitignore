@@ -10,6 +10,7 @@
 .Rhistory
 .Rproj.user/
 .Ruserdata
+.Rproj.user.bak/
 .httr-oauth
 /*.Rcheck/
 /.*tar.gz
@@ -39,3 +40,11 @@ testData/out_phase1_useMacsMut_FALSE/*.trees
 testData/out_msprime_from_macs/*.trees
 dev/testData/out_phase1_useMacsMut_FALSE/*.trees
 dev/testData/out_msprime_from_macs/*.trees
+dev/testData/*.trees
+dev/testData/*_pairs.json
+dev/testData/hotspots*.txt
+dev/testData/*_hotspots_for_window_counts.txt
+dev/testData/out_phase1_useMacsMut_FALSE/*.debug.txt
+dev/testData/out_phase1_useMacsMut_FALSE/*.demography.png
+dev/*.html
+dev/tmp_tree.*

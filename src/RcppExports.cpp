@@ -661,8 +661,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // cross
-Rcpp::List cross(const arma::field<arma::Cube<unsigned char> >& motherGeno, arma::uvec mother, const arma::field<arma::Cube<unsigned char> >& fatherGeno, arma::uvec father, const arma::field<arma::vec>& femaleMap, const arma::field<arma::vec>& maleMap, bool trackRec, arma::uword motherPloidy, arma::uword fatherPloidy, double v, double p, const arma::vec& motherCentromere, const arma::vec& fatherCentromere, double quadProb, int nThreads, /* modified by Jinyang */     bool trackRecGen);
-RcppExport SEXP _AlphaSimR_cross(SEXP motherGenoSEXP, SEXP motherSEXP, SEXP fatherGenoSEXP, SEXP fatherSEXP, SEXP femaleMapSEXP, SEXP maleMapSEXP, SEXP trackRecSEXP, SEXP motherPloidySEXP, SEXP fatherPloidySEXP, SEXP vSEXP, SEXP pSEXP, SEXP motherCentromereSEXP, SEXP fatherCentromereSEXP, SEXP quadProbSEXP, SEXP nThreadsSEXP, SEXP trackRecGenSEXP) {
+Rcpp::List cross(const arma::field<arma::Cube<unsigned char> >& motherGeno, arma::uvec mother, const arma::field<arma::Cube<unsigned char> >& fatherGeno, arma::uvec father, const arma::field<arma::vec>& femaleMap, const arma::field<arma::vec>& maleMap, bool trackRec, arma::uword motherPloidy, arma::uword fatherPloidy, double v, double p, const arma::vec& motherCentromere, const arma::vec& fatherCentromere, double quadProb, int nThreads, /* modified by Jinyang */     bool trackRecGen, bool returnRecHistGen, bool recordTsDirect, bool returnTsSegGen, const SEXP directAppendFnSEXP);
+RcppExport SEXP _AlphaSimR_cross(SEXP motherGenoSEXP, SEXP motherSEXP, SEXP fatherGenoSEXP, SEXP fatherSEXP, SEXP femaleMapSEXP, SEXP maleMapSEXP, SEXP trackRecSEXP, SEXP motherPloidySEXP, SEXP fatherPloidySEXP, SEXP vSEXP, SEXP pSEXP, SEXP motherCentromereSEXP, SEXP fatherCentromereSEXP, SEXP quadProbSEXP, SEXP nThreadsSEXP, SEXP trackRecGenSEXP, SEXP returnRecHistGenSEXP, SEXP recordTsDirectSEXP, SEXP returnTsSegGenSEXP, SEXP directAppendFnSEXPSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -682,7 +682,11 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type quadProb(quadProbSEXP);
     Rcpp::traits::input_parameter< int >::type nThreads(nThreadsSEXP);
     Rcpp::traits::input_parameter< /* modified by Jinyang */     bool >::type trackRecGen(trackRecGenSEXP);
-    rcpp_result_gen = Rcpp::wrap(cross(motherGeno, mother, fatherGeno, father, femaleMap, maleMap, trackRec, motherPloidy, fatherPloidy, v, p, motherCentromere, fatherCentromere, quadProb, nThreads, trackRecGen));
+    Rcpp::traits::input_parameter< bool >::type returnRecHistGen(returnRecHistGenSEXP);
+    Rcpp::traits::input_parameter< bool >::type recordTsDirect(recordTsDirectSEXP);
+    Rcpp::traits::input_parameter< bool >::type returnTsSegGen(returnTsSegGenSEXP);
+    Rcpp::traits::input_parameter< const SEXP >::type directAppendFnSEXP(directAppendFnSEXPSEXP);
+    rcpp_result_gen = Rcpp::wrap(cross(motherGeno, mother, fatherGeno, father, femaleMap, maleMap, trackRec, motherPloidy, fatherPloidy, v, p, motherCentromere, fatherCentromere, quadProb, nThreads, trackRecGen, returnRecHistGen, recordTsDirect, returnTsSegGen, directAppendFnSEXP));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -951,6 +955,63 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// tsForwardNodeTableAddRows
+Rcpp::IntegerVector tsForwardNodeTableAddRows(const SEXP tc, const Rcpp::IntegerVector flags, const Rcpp::NumericVector time, const Rcpp::IntegerVector population, const Rcpp::IntegerVector individual);
+RcppExport SEXP _AlphaSimR_tsForwardNodeTableAddRows(SEXP tcSEXP, SEXP flagsSEXP, SEXP timeSEXP, SEXP populationSEXP, SEXP individualSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const SEXP >::type tc(tcSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector >::type flags(flagsSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector >::type time(timeSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector >::type population(populationSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector >::type individual(individualSEXP);
+    rcpp_result_gen = Rcpp::wrap(tsForwardNodeTableAddRows(tc, flags, time, population, individual));
+    return rcpp_result_gen;
+END_RCPP
+}
+// tsForwardNodeTableAddRowsWithMetadata
+Rcpp::IntegerVector tsForwardNodeTableAddRowsWithMetadata(const SEXP tc, const Rcpp::IntegerVector flags, const Rcpp::NumericVector time, const Rcpp::IntegerVector population, const Rcpp::IntegerVector individual, const Rcpp::CharacterVector nodeKey);
+RcppExport SEXP _AlphaSimR_tsForwardNodeTableAddRowsWithMetadata(SEXP tcSEXP, SEXP flagsSEXP, SEXP timeSEXP, SEXP populationSEXP, SEXP individualSEXP, SEXP nodeKeySEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const SEXP >::type tc(tcSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector >::type flags(flagsSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector >::type time(timeSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector >::type population(populationSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector >::type individual(individualSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::CharacterVector >::type nodeKey(nodeKeySEXP);
+    rcpp_result_gen = Rcpp::wrap(tsForwardNodeTableAddRowsWithMetadata(tc, flags, time, population, individual, nodeKey));
+    return rcpp_result_gen;
+END_RCPP
+}
+// tsForwardEdgeTableAddRows
+void tsForwardEdgeTableAddRows(const SEXP tc, const Rcpp::NumericVector left, const Rcpp::NumericVector right, const Rcpp::IntegerVector parent, const Rcpp::IntegerVector child);
+RcppExport SEXP _AlphaSimR_tsForwardEdgeTableAddRows(SEXP tcSEXP, SEXP leftSEXP, SEXP rightSEXP, SEXP parentSEXP, SEXP childSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const SEXP >::type tc(tcSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector >::type left(leftSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector >::type right(rightSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector >::type parent(parentSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector >::type child(childSEXP);
+    tsForwardEdgeTableAddRows(tc, left, right, parent, child);
+    return R_NilValue;
+END_RCPP
+}
+// tsForwardSetSampleFlags
+void tsForwardSetSampleFlags(const SEXP tc, const Rcpp::IntegerVector samples, const bool clearExisting);
+RcppExport SEXP _AlphaSimR_tsForwardSetSampleFlags(SEXP tcSEXP, SEXP samplesSEXP, SEXP clearExistingSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const SEXP >::type tc(tcSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector >::type samples(samplesSEXP);
+    Rcpp::traits::input_parameter< const bool >::type clearExisting(clearExistingSEXP);
+    tsForwardSetSampleFlags(tc, samples, clearExisting);
+    return R_NilValue;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_AlphaSimR_solveRRBLUP", (DL_FUNC) &_AlphaSimR_solveRRBLUP, 3},
@@ -994,7 +1055,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_AlphaSimR_getNonFounderIbd", (DL_FUNC) &_AlphaSimR_getNonFounderIbd, 3},
     {"_AlphaSimR_getFounderIbd", (DL_FUNC) &_AlphaSimR_getFounderIbd, 2},
     {"_AlphaSimR_createIbdMat", (DL_FUNC) &_AlphaSimR_createIbdMat, 5},
-    {"_AlphaSimR_cross", (DL_FUNC) &_AlphaSimR_cross, 16},
+    {"_AlphaSimR_cross", (DL_FUNC) &_AlphaSimR_cross, 20},
     {"_AlphaSimR_createDH2", (DL_FUNC) &_AlphaSimR_createDH2, 7},
     {"_AlphaSimR_createReducedGenome", (DL_FUNC) &_AlphaSimR_createReducedGenome, 10},
     {"_AlphaSimR_popVarCpp", (DL_FUNC) &_AlphaSimR_popVarCpp, 1},
@@ -1015,6 +1076,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"_AlphaSimR_rtsk_treeseq_get_num_individuals2", (DL_FUNC) &_AlphaSimR_rtsk_treeseq_get_num_individuals2, 1},
     {"_AlphaSimR_tsMutateTableCollection", (DL_FUNC) &_AlphaSimR_tsMutateTableCollection, 3},
     {"_AlphaSimR_tsFinalizeInbredTableCollection", (DL_FUNC) &_AlphaSimR_tsFinalizeInbredTableCollection, 2},
+    {"_AlphaSimR_tsForwardNodeTableAddRows", (DL_FUNC) &_AlphaSimR_tsForwardNodeTableAddRows, 5},
+    {"_AlphaSimR_tsForwardNodeTableAddRowsWithMetadata", (DL_FUNC) &_AlphaSimR_tsForwardNodeTableAddRowsWithMetadata, 6},
+    {"_AlphaSimR_tsForwardEdgeTableAddRows", (DL_FUNC) &_AlphaSimR_tsForwardEdgeTableAddRows, 5},
+    {"_AlphaSimR_tsForwardSetSampleFlags", (DL_FUNC) &_AlphaSimR_tsForwardSetSampleFlags, 3},
     {NULL, NULL, 0}
 };
 

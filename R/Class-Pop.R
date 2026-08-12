@@ -823,6 +823,14 @@ newPop = function(rawPop,ploidy=NULL,simParam=NULL,nThreads=NULL,...){
   
   output = simParam$finalizePop(output, simParam=simParam, ...)
 
+  ts_forward_attrs <- c("tsForwardSource", "tsForwardPosMeta")
+  for (nm in ts_forward_attrs) {
+    val <- attr(rawPop, nm, exact = TRUE)
+    if (!is.null(val)) {
+      attr(output, nm) <- val
+    }
+  }
+
   return(output)
 }
 

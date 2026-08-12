@@ -1,4 +1,6 @@
 #include "alphasimr.h"
+#include <cmath>
+#include <vector>
 
 namespace {
 
@@ -15,6 +17,48 @@ std::vector<alphasimrRng::rngPtr> makeChrRngs(arma::uword nChr) {
     chrRngs.push_back(alphasimrRng::cloneStream(baseRng, chr + 1));
   }
   return chrRngs;
+}
+
+struct TsSegRow {
+  int childLocal;
+  int chr;
+  int hap;
+  int parentSide;  // 1 = mother/female, 2 = father/male
+  int parentIndex; // index in supplied parent population (1-based)
+  int parentHap;   // parental haplotype (1-based)
+  double leftGen;
+  double rightGen;
+};
+
+void appendTsSegRowsFromHistGen(const arma::Mat<double>& histGen,
+                                int childLocal,
+                                int chr,
+                                int hap,
+                                int parentSide,
+                                int parentIndex,
+                                double chrGenLen,
+                                std::vector<TsSegRow>& out){
+  if(histGen.n_rows == 0){
+    return;
+  }
+  for(arma::uword i = 0; i < histGen.n_rows; ++i){
+    const double left = histGen(i, 1);
+    const double right = (i + 1 < histGen.n_rows) ? histGen(i + 1, 1) : chrGenLen;
+    if(!std::isfinite(left) || !std::isfinite(right) || right <= left){
+      continue;
+    }
+    const int parentHap = static_cast<int>(std::llround(histGen(i, 0)));
+    out.push_back(TsSegRow{
+      childLocal,
+      chr,
+      hap,
+      parentSide,
+      parentIndex,
+      parentHap,
+      left,
+      right
+    });
+  }
 }
 
 } // namespace
@@ -118,6 +162,43 @@ arma::Mat<double> RecHistDbl::getHist(arma::uword ind,
                                       arma::uword par){
   return hist(ind)(chr)(par);
 }
+
+namespace {
+
+void appendBivalentTrackRecGen(arma::Mat<double>& histG,
+                               int parentHap1,
+                               int parentHap2,
+                               bool returnRecHistGen,
+                               RecHistDbl& histGen,
+                               arma::uword ind,
+                               arma::uword chr,
+                               arma::uword progenyChr,
+                               int parentSide,
+                               int parentIndex,
+                               double chrGenLen,
+                               bool collectTsSegRows,
+                               std::vector<TsSegRow>& tsSegRows){
+  histG.col(0) *= 100.0;
+  histG.col(0).replace(100.0, double(parentHap1));
+  histG.col(0).replace(200.0, double(parentHap2));
+  if(returnRecHistGen){
+    histGen.addHist(histG, ind, chr, progenyChr);
+  }
+  if(collectTsSegRows){
+    appendTsSegRowsFromHistGen(
+      histG,
+      static_cast<int>(ind + 1),
+      static_cast<int>(chr + 1),
+      static_cast<int>(progenyChr + 1),
+      parentSide,
+      parentIndex,
+      chrGenLen,
+      tsSegRows
+    );
+  }
+}
+
+} // namespace
 
 // Samples the locations for chiasmata via a gamma process
 // end, the length of the interval used to sample
@@ -442,55 +523,6 @@ arma::Mat<int> findBivalentCO(const arma::vec& genMap, double v, double p,
   
   return removeDoubleCO(output);
 }
-
-// Continuous (genetic-coordinate) recombination history for a bivalent pair
-// Output columns: (originChr, startPosGen)
-// Row 0 is always (1, 0.0)
-arma::Mat<double> findBivalentCO_gen(const arma::vec& genMap, double v, double p,
-                                     alphasimrRng::rngEngine& rng){
-  arma::uword readChr = 0;
-  double genLen = genMap(genMap.n_elem-1);
-
-  // 1) Sample crossover positions on the genetic map
-  arma::vec posCO = sampleChiasmata(genLen, v, p, rng);
-
-  // If no chiasmata were sampled: return a single record (all from chr1)
-  if(posCO.n_elem==0){
-    arma::Mat<double> output(1,2);
-    output(0,0) = 1.0;  // origin chr1
-    output(0,1) = 0.0;  // start at beginning of chromosome (continuous)
-    return output;
-  }
-
-  // 2）Thin crossovers
-  arma::vec thin = alphasimrRng::runifVec(posCO.n_elem, rng);
-  posCO = posCO(find(thin>0.5));
-
-  arma::uword nCO = posCO.n_elem;
-
-  arma::Mat<double> output(nCO+1, 2);
-
-  // 3） Allocate output
-  output(0,0) = 1.0;
-  output(0,1) = 0.0;
-
-  if(nCO==0){
-    return output;
-  }
-
-  posCO = sort(posCO);
-
-  // 4) Alternate origin each crossover
-  for(arma::uword i=0; i<nCO; ++i){
-    ++readChr;
-    readChr = readChr%2;
-    output(i+1, 0) = double(readChr + 1);
-    output(i+1, 1) = posCO(i);
-  }
-
-  return output;
-}
-
 
 /*
  * Finds recombination maps for a quadrivalent "cross-type" configuration
@@ -1125,52 +1157,6 @@ void bivalent2(const arma::Col<unsigned char>& chr1,
 }
 
 
-// Simulates a gamete using the existing discrete (bin-based) model for geno,
-// AND also returns a continuous (genetic-coordinate) recombination history.
-//
-// - hist: original int matrix (originChr, startSite/bin) used for transferGeno
-// - histGen: new double matrix (originChr, startPosGen) with true breakpoints
-void bivalent2Old(const arma::Col<unsigned char>& chr1,
-               const arma::Col<unsigned char>& chr2,
-               const arma::vec& genMap,
-               double v,
-               double p,
-               arma::Col<unsigned char>& output,
-               arma::Mat<int>& hist,
-               // histGen added
-               arma::Mat<double>& histGen,
-               alphasimrRng::rngEngine& rng){
-
-  hist = findBivalentCO(genMap, v, p, rng);
-
-  // histGen added
-  histGen = findBivalentCO_gen(genMap, v, p, rng);
-
-  if(hist.n_rows==1){
-    output = chr1;
-  }else{
-    int nBins = chr1.n_elem;
-
-    for(arma::uword i=0; i<(hist.n_rows-1); ++i){
-      switch(hist(i,0)){
-        case 1:
-          transferGeno(chr1, output, hist(i,1), hist(i+1,1));
-          break;
-        case 2:
-          transferGeno(chr2, output, hist(i,1), hist(i+1,1));
-      }
-    }
-
-    switch(hist(hist.n_rows-1,0)){
-      case 1:
-        transferGeno(chr1, output, hist(hist.n_rows-1,1), nBins*8+1);
-        break;
-      case 2:
-        transferGeno(chr2, output, hist(hist.n_rows-1,1), nBins*8+1);
-    }
-  }
-}
-
 // Simulates a gamete using a count-location model for recombination
 // rng is the explicit dqrng stream used for crossover sampling and thinning.
 void quadrivalent(const arma::Col<unsigned char>& chr1,
@@ -1349,7 +1335,28 @@ Rcpp::List cross(
     double quadProb,
     int nThreads,
     /* modified by Jinyang */
-    bool trackRecGen){
+    bool trackRecGen,
+    bool returnRecHistGen,
+    bool recordTsDirect,
+    bool returnTsSegGen,
+    const SEXP directAppendFnSEXP){
+  if(returnRecHistGen && !trackRecGen){
+    Rcpp::stop("returnRecHistGen requires trackRecGen = TRUE.");
+  }
+  if(recordTsDirect && !trackRecGen){
+    Rcpp::stop("recordTsDirect requires trackRecGen = TRUE.");
+  }
+  if(trackRecGen && quadProb > 0.0){
+    Rcpp::stop("tsSegGen from histGen is currently supported only when quadProb == 0.");
+  }
+  SEXP directAppendFnObj = R_NilValue;
+  if(recordTsDirect){
+    if(Rf_isNull(directAppendFnSEXP)){
+      Rcpp::stop("recordTsDirect requires a non-NULL directAppendFn.");
+    }
+    directAppendFnObj = directAppendFnSEXP;
+  }
+  const bool collectTsSegRows = trackRecGen && (recordTsDirect || returnTsSegGen);
   mother -= 1; // R to C++
   father -= 1; // R to C++
   arma::uword ploidy = (motherPloidy+fatherPloidy)/2;
@@ -1364,8 +1371,12 @@ Rcpp::List cross(
 
   // modified by Jinyang
   RecHistDbl histGen;
-  if(trackRecGen){
+  if(returnRecHistGen){
     histGen.setSize(nInd, nChr, ploidy);
+  }
+  std::vector<std::vector<TsSegRow> > tsSegByChr;
+  if(collectTsSegRows){
+    tsSegByChr.resize(nChr);
   }
 
   if(nChr < static_cast<arma::uword>(nThreads) ){
@@ -1389,8 +1400,14 @@ Rcpp::List cross(
       xf(i) = i;
     arma::uword progenyChr;
     arma::uword nBins = motherGeno(chr).n_rows;
+    const double femaleGenLen = femaleMap(chr)(femaleMap(chr).n_elem - 1);
+    const double maleGenLen = maleMap(chr)(maleMap(chr).n_elem - 1);
     arma::Cube<unsigned char> tmpGeno(nBins,ploidy,nInd);
     arma::Col<unsigned char> gamete1(nBins), gamete2(nBins);
+    std::vector<TsSegRow> tsSegRows;
+    if(collectTsSegRows){
+      tsSegRows.reserve(static_cast<std::size_t>(nInd * ploidy * 4));
+    }
     
     //Loop through individuals
     for(arma::uword ind=0; ind<nInd; ++ind){
@@ -1432,11 +1449,21 @@ Rcpp::List cross(
             }
             // modified by Jinyang ----
             if(trackRecGen){
-              // mirror the same origin remapping on histG1 (double)
-              histG1.col(0) *= 100.0;
-              histG1.col(0).replace(100.0, double(int(xm(x))+1));
-              histG1.col(0).replace(200.0, double(int(xm(x+1))+1));
-              histGen.addHist(histG1, ind, chr, progenyChr);
+              appendBivalentTrackRecGen(
+                histG1,
+                int(xm(x)) + 1,
+                int(xm(x+1)) + 1,
+                returnRecHistGen,
+                histGen,
+                ind,
+                chr,
+                progenyChr,
+                1,
+                static_cast<int>(mother(ind) + 1),
+                femaleGenLen,
+                collectTsSegRows,
+                tsSegRows
+              );
             }
             // ----modified by Jinyang
             ++progenyChr;
@@ -1473,11 +1500,21 @@ Rcpp::List cross(
             }
             // modified by Jinyang ----
             if(trackRecGen){
-              // mirror the same origin remapping on histG1 (double)
-              histG1.col(0) *= 100.0;
-              histG1.col(0).replace(100.0, double(int(xm(x+2))+1));
-              histG1.col(0).replace(200.0, double(int(xm(x+3))+1));
-              histGen.addHist(histG1, ind, chr, progenyChr);
+              appendBivalentTrackRecGen(
+                histG1,
+                int(xm(x+2)) + 1,
+                int(xm(x+3)) + 1,
+                returnRecHistGen,
+                histGen,
+                ind,
+                chr,
+                progenyChr,
+                1,
+                static_cast<int>(mother(ind) + 1),
+                femaleGenLen,
+                collectTsSegRows,
+                tsSegRows
+              );
             }
             // ----modified by Jinyang
             ++progenyChr;
@@ -1544,11 +1581,21 @@ Rcpp::List cross(
           }
           // modified by Jinyang ----
           if(trackRecGen){
-            // mirror the same origin remapping on histG1 (double)
-            histG1.col(0) *= 100.0;
-            histG1.col(0).replace(100.0, double(int(xm(x))+1));
-            histG1.col(0).replace(200.0, double(int(xm(x+1))+1));
-            histGen.addHist(histG1, ind, chr, progenyChr);
+            appendBivalentTrackRecGen(
+              histG1,
+              int(xm(x)) + 1,
+              int(xm(x+1)) + 1,
+              returnRecHistGen,
+              histGen,
+              ind,
+              chr,
+              progenyChr,
+              1,
+              static_cast<int>(mother(ind) + 1),
+              femaleGenLen,
+              collectTsSegRows,
+              tsSegRows
+            );
           }
           // ----modified by Jinyang
           ++progenyChr;
@@ -1592,11 +1639,21 @@ Rcpp::List cross(
             }
             // modified by Jinyang ----
             if(trackRecGen){
-              // mirror the same origin remapping on histG1 (double)
-              histG1.col(0) *= 100.0;
-              histG1.col(0).replace(100.0, double(int(xf(x))+1));
-              histG1.col(0).replace(200.0, double(int(xf(x+1))+1));
-              histGen.addHist(histG1, ind, chr, progenyChr);
+              appendBivalentTrackRecGen(
+                histG1,
+                int(xf(x)) + 1,
+                int(xf(x+1)) + 1,
+                returnRecHistGen,
+                histGen,
+                ind,
+                chr,
+                progenyChr,
+                2,
+                static_cast<int>(father(ind) + 1),
+                maleGenLen,
+                collectTsSegRows,
+                tsSegRows
+              );
             }
             ++progenyChr;
             
@@ -1632,11 +1689,21 @@ Rcpp::List cross(
             }
             // modified by Jinyang ----
             if(trackRecGen){
-              // mirror the same origin remapping on histG1 (double)
-              histG1.col(0) *= 100.0;
-              histG1.col(0).replace(100.0, double(int(xf(x+2))+1));
-              histG1.col(0).replace(200.0, double(int(xf(x+3))+1));
-              histGen.addHist(histG1, ind, chr, progenyChr);
+              appendBivalentTrackRecGen(
+                histG1,
+                int(xf(x+2)) + 1,
+                int(xf(x+3)) + 1,
+                returnRecHistGen,
+                histGen,
+                ind,
+                chr,
+                progenyChr,
+                2,
+                static_cast<int>(father(ind) + 1),
+                maleGenLen,
+                collectTsSegRows,
+                tsSegRows
+              );
             }
             ++progenyChr;
           }else{
@@ -1701,29 +1768,90 @@ Rcpp::List cross(
           }
           // modified by Jinyang ----
           if(trackRecGen){
-            // mirror the same origin remapping on histG1 (double)
-            histG1.col(0) *= 100.0;
-            histG1.col(0).replace(100.0, double(int(xf(x))+1));
-            histG1.col(0).replace(200.0, double(int(xf(x+1))+1));
-            histGen.addHist(histG1, ind, chr, progenyChr);
+            appendBivalentTrackRecGen(
+              histG1,
+              int(xf(x)) + 1,
+              int(xf(x+1)) + 1,
+              returnRecHistGen,
+              histGen,
+              ind,
+              chr,
+              progenyChr,
+              2,
+              static_cast<int>(father(ind) + 1),
+              maleGenLen,
+              collectTsSegRows,
+              tsSegRows
+            );
           }
           ++progenyChr;
         }
       }
     } //End individual loop
     geno(chr) = tmpGeno;
+    if(collectTsSegRows){
+      tsSegByChr[chr].swap(tsSegRows);
+    }
   } //End chromosome loop
+
+  arma::mat tsSegGenMat;
+  if(collectTsSegRows){
+    std::size_t nSeg = 0;
+    for(const auto& x : tsSegByChr){
+      nSeg += x.size();
+    }
+    tsSegGenMat.set_size(nSeg, 8);
+    std::size_t row = 0;
+    for(const auto& x : tsSegByChr){
+      for(const auto& s : x){
+        tsSegGenMat(row, 0) = s.childLocal;
+        tsSegGenMat(row, 1) = s.chr;
+        tsSegGenMat(row, 2) = s.hap;
+        tsSegGenMat(row, 3) = s.parentSide;
+        tsSegGenMat(row, 4) = s.parentIndex;
+        tsSegGenMat(row, 5) = s.parentHap;
+        tsSegGenMat(row, 6) = s.leftGen;
+        tsSegGenMat(row, 7) = s.rightGen;
+        ++row;
+      }
+    }
+  }
+  if(recordTsDirect && trackRecGen && tsSegGenMat.n_rows > 0){
+    Rcpp::RObject ok = Rcpp::Function(directAppendFnObj)(tsSegGenMat);
+    if(TYPEOF(ok) == LGLSXP && !Rcpp::as<bool>(ok)){
+      Rcpp::stop("Direct TS append callback returned FALSE.");
+    }
+  }
 
   // modified by Jinyang ----
   if(trackRec){
     if(trackRecGen){
+      if(returnRecHistGen){
+        if(returnTsSegGen){
+          return Rcpp::List::create(Rcpp::Named("geno")=geno,
+                                    Rcpp::Named("recHist")=hist.hist,
+                                    Rcpp::Named("recHistGen")=histGen.hist,
+                                    Rcpp::Named("tsSegGen")=tsSegGenMat);
+        }
+        return Rcpp::List::create(Rcpp::Named("geno")=geno,
+                                  Rcpp::Named("recHist")=hist.hist,
+                                  Rcpp::Named("recHistGen")=histGen.hist);
+      }
+      if(returnTsSegGen){
+        return Rcpp::List::create(Rcpp::Named("geno")=geno,
+                                  Rcpp::Named("recHist")=hist.hist,
+                                  Rcpp::Named("tsSegGen")=tsSegGenMat);
+      }
       return Rcpp::List::create(Rcpp::Named("geno")=geno,
-                                Rcpp::Named("recHist")=hist.hist,
-                                Rcpp::Named("recHistGen")=histGen.hist);
+                                Rcpp::Named("recHist")=hist.hist);
     } else {
       return Rcpp::List::create(Rcpp::Named("geno")=geno,
                                 Rcpp::Named("recHist")=hist.hist);
     }
+  }
+  if(trackRecGen && returnTsSegGen){
+    return Rcpp::List::create(Rcpp::Named("geno")=geno,
+                              Rcpp::Named("tsSegGen")=tsSegGenMat);
   }
   return Rcpp::List::create(Rcpp::Named("geno")=geno);
 }

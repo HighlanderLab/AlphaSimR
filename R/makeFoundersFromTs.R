@@ -153,17 +153,6 @@ segregating_variants <- function(ts, debug = FALSE) {
   return(list(H = H, P = P))
 }
 
-#' Debug Wrapper for Variant Extraction
-#'
-#' @param ts A `RcppTskit::TreeSequence` object.
-#'
-#' @return A list with `H` and `P` as in [segregating_variants()].
-#' @keywords internal
-#' @noRd
-segregating_variants_debug <- function(ts) {
-  segregating_variants(ts, debug = TRUE)
-}
-
 #' Convert Physical Positions to Cumulative Morgan Positions
 #'
 #' @param x Numeric vector of physical positions.
@@ -253,6 +242,7 @@ ts2chrData <- function(ts_path = NULL, breaks, rates, segSites, site_sampling_se
     tc_xptr = tc_xptr,
     table_xptr = table_xptr
   )
+  seqLen <- as.numeric(ts$sequence_length())
   num_pos <- ts$num_sites()
 
   if (!is.null(segSites)) {
@@ -285,7 +275,8 @@ ts2chrData <- function(ts_path = NULL, breaks, rates, segSites, site_sampling_se
   list(
     genMap = list(mpos),
     haplotypes = list(H),
-    keptPosBp = pos
+    keptPosBp = pos,
+    seqLen = seqLen
   )
 }
 
@@ -556,6 +547,18 @@ ts2chrData <- function(ts_path = NULL, breaks, rates, segSites, site_sampling_se
   lapply(chr_specs, worker)
 }
 
+.asMapPop_ts_source_from_spec <- function(info) {
+  out <- list(
+    ts_path = .asMapPop_get(info, "ts_path"),
+    ts = .asMapPop_get(info, "ts"),
+    ts_xptr = .asMapPop_get(info, "ts_xptr"),
+    tc_xptr = .asMapPop_get(info, "tc_xptr"),
+    table_xptr = .asMapPop_get(info, "table_xptr")
+  )
+  has_source <- vapply(out, function(x) !is.null(x), logical(1))
+  out[has_source]
+}
+
 #' Build a MapPop from Tree Sequence Data
 #'
 #' @param chr_info Input tree-sequence data. Supports either:
@@ -598,13 +601,25 @@ asMapPop <- function(chr_info, ploidy = 2L, inbred = FALSE, segSites = NULL,
 
   # save pos in bp for tskit tables
   chrKeptPosBp <- lapply(chr_data, `[[`, "keptPosBp")
+  chrSeqLenBp <- lapply(chr_data, `[[`, "seqLen")
   chrKeptPosBpList <<- chrKeptPosBp
-  ploidy <<- ploidy
+  chrSeqLenBpList <<- chrSeqLenBp
+  # generic aliases: positions are in tree-sequence coordinate space
+  # (bp when physical positions are used, otherwise normalized coordinates)
+  chrKeptPosTsList <<- chrKeptPosBp
+  chrSeqLenTsList <<- chrSeqLenBp
 
   genMap <- do.call(c, lapply(chr_data, `[[`, "genMap"))
   haplotypes <- do.call(c, lapply(chr_data, `[[`, "haplotypes"))
 
   pop <- newMapPop(genMap = genMap, haplotypes = haplotypes, inbred = inbred, ploidy = ploidy)
+  attr(pop, "tsForwardSource") <- lapply(chr_specs, .asMapPop_ts_source_from_spec)
+  attr(pop, "tsForwardPosMeta") <- list(
+    posList = chrKeptPosBp,
+    seqLenList = chrSeqLenBp,
+    breaksList = lapply(chr_specs, function(x) as.numeric(.asMapPop_get(x, "breaks"))),
+    ratesList = lapply(chr_specs, function(x) as.numeric(.asMapPop_get(x, "rates")))
+  )
   if (isTRUE(returnMeta)) {
     return(list(
       pop = pop,

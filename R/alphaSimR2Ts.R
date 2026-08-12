@@ -1,4 +1,13 @@
-library(jsonlite)
+.bridgeMetadataString <- function(key) {
+  key <- as.character(key)
+  key <- gsub("\\\\", "\\\\\\\\", key)
+  key <- gsub("\"", "\\\\\"", key)
+  paste0("{\"alphaSimR\":{\"id\":\"", key, "\"}}")
+}
+
+.bridgeIndividualMetadataRaw <- function(file_id) {
+  charToRaw(paste0("{\"file_id\":", as.integer(file_id), "}"))
+}
 
 recHistMatToSegDf <- function(histMat, nLoci) {
 
@@ -59,59 +68,32 @@ recHistToSegDfWithParents <- function(SP, offspringPop, nLociByChr) {
   do.call(rbind, out)
 }
 
-bridgeCollectSegFromSimOutput <- function(SP, simOutput) {
-  bridgeSegDfList <<- list()
+bridgeCollectSegFromSimOutput <- function(SP, simOutput, pos_list) {
+  out <- list()
+  nLociByChr <- lapply(pos_list, length)
 
-  nLociByChr <- lapply(chrKeptPosBpList, length)
-
-  for (k in 2:length(simOutput)) {
-    segDf <- recHistToSegDfWithParents(SP, simOutput[[k]], nLociByChr)
-    bridgeSegDfList[[length(bridgeSegDfList) + 1]] <<- segDf
-  }
-
-  invisible(bridgeSegDfList)
-}
-
-
-segDfToEdgeDfUsingBridge <- function(segDf, chr_info) {
-  # segDF: childID, hap, chr, locusStart, locusEnd, origin
-  out <- segDf
-  out$left <- NA_real_
-  out$right <- NA_real_
-
-  for (cc in sort(unique(out$chr))) {
-    #posBp <- bridgeEnv$chrKeptPosBpList[[cc]]
-    #if (is.null(posBp)) stop("bridgeEnv$chrKeptPosBpList[[", cc, "]] is NULL.")
-    posBp <- chrKeptPosBpList[[cc]]
-
-    tsPath <- chr_info[[cc]]$ts_path
-    ts <- tskit$load(tsPath)
-    seqLen <- as.numeric(ts$sequence_length)
-
-    idx <- which(out$chr == cc)
-
-    for (i in idx) {
-      s <- out$locusStart[i]
-      e <- out$locusEnd[i]
-      out$left[i] <- if (s == 1) 0 else posBp[s]
-      out$right[i] <- if (e < length(posBp)) posBp[e + 1] else seqLen
+  if (length(simOutput) >= 2L) {
+    for (k in seq.int(2L, length(simOutput))) {
+      segDf <- recHistToSegDfWithParents(SP, simOutput[[k]], nLociByChr)
+      out[[length(out) + 1L]] <- segDf
     }
   }
-  out
+
+  invisible(out)
 }
 
-bridgeAllSegToEdgeDf <- function(chr_info) {
-  allSeg <- do.call(rbind, bridgeSegDfList)
+bridgeAllSegToEdgeDf <- function(chr_info, seg_list, pos_list) {
+  allSeg <- do.call(rbind, seg_list)
 
   out <- allSeg
   out$left <- NA
   out$right <- NA
 
   for (cc in sort(unique(out$chr))) {
-    posBp <- chrKeptPosBpList[[cc]]
+    posBp <- pos_list[[cc]]
 
     tsPath <- chr_info[[cc]]$ts_path
-    tc <- tc_load(tsPath)
+    tc <- RcppTskit::tc_load(tsPath)
     seqLen <- tc$sequence_length()
 
     idx <- which(out$chr == cc)
@@ -146,23 +128,33 @@ bridgeComputeIndTime <- function(pedigree) {
 
 
 bridgeWriteTrees <- function(chr_info, edgeDf, SP, out_dir = NULL,
-                             out_basename = "AlphaSimR_extended") {
+                             out_basename = "AlphaSimR_extended",
+                             ploidy = NULL) {
 
   indTime <- bridgeComputeIndTime(SP$pedigree)
 
-  nodeIdMapByChr <<- vector("list", length(chr_info))
-  indIdMapByChr  <<- vector("list", length(chr_info))
+  if (is.null(ploidy)) {
+    ploidy <- suppressWarnings(max(edgeDf$hap, edgeDf$parentHap, na.rm = TRUE))
+  }
+  ploidy <- as.integer(ploidy)
+  if (length(ploidy) != 1L || is.na(ploidy) || ploidy < 1L) {
+    stop("ploidy must be supplied or inferable from edgeDf", call. = FALSE)
+  }
+
+  outPaths <- character(length(chr_info))
 
   for (cc in seq_along(chr_info)) {
 
-    nodeIdMapByChr[[cc]] <<- list()
-    indIdMapByChr[[cc]]  <<- list()
+    nodeIdMap <- new.env(parent = emptyenv())
+    indIdMap <- new.env(parent = emptyenv())
 
-    ts <- ts_load(chr_info[[cc]]$ts_path)
+    ts <- RcppTskit::ts_load(chr_info[[cc]]$ts_path)
     tc <- ts$dump_tables()
 
     df <- edgeDf[edgeDf$chr == cc, , drop = FALSE]
-    if (nrow(df) == 0) next
+    if (nrow(df) == 0) {
+      next
+    }
 
     # get indIDs for sampled nodes
     sampNodeId <- ts$samples()
@@ -178,16 +170,19 @@ bridgeWriteTrees <- function(chr_info, edgeDf, SP, out_dir = NULL,
       )
     }
 
+    if (length(sampNodeId) %% ploidy != 0L) {
+      stop("Sample node count is not divisible by ploidy on chr ", cc, call. = FALSE)
+    }
     nFounder <- length(sampNodeId) / ploidy
     idx <- 1
     for (ind in 1:nFounder) {
       indRow <- sampIndRow[idx]
-      indIdMapByChr[[cc]][[as.character(ind)]] <<- indRow
+      assign(as.character(ind), indRow, envir = indIdMap)
 
       for (h in 1:ploidy) {
         nodeId <- as.integer(unlist(sampNodeId[[idx]]))[1]
         key <- paste(ind, h, sep = "_")
-        nodeIdMapByChr[[cc]][[key]] <<- nodeId
+        assign(key, nodeId, envir = nodeIdMap)
         #  list(alphaSimR = list(id = key)))
         idx <- idx + 1
       }
@@ -197,7 +192,8 @@ bridgeWriteTrees <- function(chr_info, edgeDf, SP, out_dir = NULL,
     nextInd <- as.integer(tc$num_individuals())
     addNewIndividual <- function(alphaId) {
       key <- as.character(alphaId)
-      if (!is.null(indIdMapByChr[[cc]][[key]])) return(indIdMapByChr[[cc]][[key]])
+      indRow <- get0(key, envir = indIdMap, inherits = FALSE)
+      if (!is.null(indRow)) return(indRow)
 
       m <- SP$pedigree[alphaId, "mother"]
       f <- SP$pedigree[alphaId, "father"]
@@ -209,11 +205,9 @@ bridgeWriteTrees <- function(chr_info, edgeDf, SP, out_dir = NULL,
       tc$individual_table_add_row(
         #parents = list(as.integer(mRow), as.integer(fRow)),
         parents = c(as.integer(mRow), as.integer(fRow)),
-        metadata = charToRaw(toJSON(
-          list(file_id=as.integer(newId)),
-        auto_unbox = TRUE)))
+        metadata = .bridgeIndividualMetadataRaw(newId))
 
-      indIdMapByChr[[cc]][[key]] <<- as.integer(newId)
+      assign(key, as.integer(newId), envir = indIdMap)
 
       nextInd <<- nextInd + 1L
       newId
@@ -227,20 +221,18 @@ bridgeWriteTrees <- function(chr_info, edgeDf, SP, out_dir = NULL,
     # append child nodes
     childKeys <- unique(paste(df$childId, df$hap, sep = "_"))
     for (key in childKeys) {
-      if (is.null(nodeIdMapByChr[[cc]][[key]])) {
+      if (is.null(get0(key, envir = nodeIdMap, inherits = FALSE))) {
         childId <- as.integer(sub("_.*$", "", key))
-        indRow  <- indIdMapByChr[[cc]][[as.character(childId)]]
+        indRow  <- get(as.character(childId), envir = indIdMap, inherits = FALSE)
 
         tc$node_table_add_row(
           flags = 0L,
           time  = indTime[[childId]],
           population = -1L,
           individual = indRow,
-          metadata = as.character(toJSON(
-            list(alphaSimR = list(id = key)),
-            auto_unbox = TRUE, force = TRUE))
+          metadata = .bridgeMetadataString(key)
         )
-        nodeIdMapByChr[[cc]][[key]] <<- as.integer(tc$num_nodes() - 1)
+        assign(key, as.integer(tc$num_nodes() - 1), envir = nodeIdMap)
       }
     }
 
@@ -249,16 +241,18 @@ bridgeWriteTrees <- function(chr_info, edgeDf, SP, out_dir = NULL,
       parentKey <- paste(df$parentId[i], df$parentHap[i], sep = "_")
       childKey  <- paste(df$childId[i], df$hap[i], sep = "_")
 
-      if (is.null(nodeIdMapByChr[[cc]][[parentKey]])) {
+      parentNode <- get0(parentKey, envir = nodeIdMap, inherits = FALSE)
+      if (is.null(parentNode)) {
         stop("Missing parent node for key=", parentKey,
              " on chr=", cc, ". Check founder mapping.")
       }
+      childNode <- get(childKey, envir = nodeIdMap, inherits = FALSE)
 
       tc$edge_table_add_row(
         left   = df$left[i],
         right  = df$right[i],
-        parent = nodeIdMapByChr[[cc]][[parentKey]],
-        child = nodeIdMapByChr[[cc]][[childKey]]
+        parent = parentNode,
+        child = childNode
       )
     }
 
@@ -269,8 +263,9 @@ bridgeWriteTrees <- function(chr_info, edgeDf, SP, out_dir = NULL,
     outPath <- file.path(outDirCc, paste0(out_basename, "_chr", cc - 1, ".trees"))
 
     newTs$dump(outPath)
+    outPaths[[cc]] <- outPath
     cat("Wrote:", outPath, "\n")
   }
 
-  invisible(TRUE)
+  invisible(outPaths[nzchar(outPaths)])
 }
