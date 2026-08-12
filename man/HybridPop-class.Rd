@@ -27,7 +27,7 @@ Memory is saved by not storing genotypic data.
 }
 \section{Methods (by generic)}{
 \itemize{
-\item \code{x[i}: Extract HybridPop using index or id
+\item \code{x = HybridPop[i = ANY, j = ANY, drop = ANY]}: Extract HybridPop using index or id
 
 \item \code{c(HybridPop)}: Combine multiple HybridPops
 

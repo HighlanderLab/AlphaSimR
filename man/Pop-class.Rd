@@ -32,7 +32,7 @@ phenotypes, and pedigrees.
 }
 \section{Methods (by generic)}{
 \itemize{
-\item \code{x[i}: Extract Pop by index or id
+\item \code{x = Pop[i = ANY, j = ANY, drop = ANY]}: Extract Pop by index or id
 
 \item \code{c(Pop)}: Combine multiple Pops
 

@@ -29,7 +29,7 @@ for creating initial populations and setting traits in the
 }
 \section{Methods (by generic)}{
 \itemize{
-\item \code{x[i}: Extract MapPop by index
+\item \code{x = MapPop[i = ANY, j = ANY, drop = ANY]}: Extract MapPop by index
 
 \item \code{c(MapPop)}: Combine multiple MapPops
 

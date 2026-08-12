@@ -31,7 +31,7 @@ The raw population class contains only genotype data.
 }
 \section{Methods (by generic)}{
 \itemize{
-\item \code{x[i}: Extract RawPop by index
+\item \code{x = RawPop[i = ANY, j = ANY, drop = ANY]}: Extract RawPop by index
 
 \item \code{c(RawPop)}: Combine multiple RawPops
 
