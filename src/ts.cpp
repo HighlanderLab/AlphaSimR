@@ -1,6 +1,8 @@
 #include "alphasimr.h"
 #include <RcppTskit.hpp>
 #include "postTS.h"
+#include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 // [[Rcpp::depends(RcppTskit)]]
@@ -114,6 +116,142 @@ void tsFinalizeInbredTableCollection(const SEXP tc, const int ploidy) {
                    "Failed to sort table collection after inbred finalization");
   tsPost::checkTsk(tsk_table_collection_build_index(tables, 0),
                    "Failed to build index after inbred finalization");
+}
+
+// [[Rcpp::export]]
+SEXP vcfFounderTableCollection(const Rcpp::IntegerMatrix haplo,
+                               const Rcpp::NumericVector pos,
+                               const double seqLen,
+                               const int ploidy,
+                               const bool addTsMut) {
+  const int nHaplo = haplo.nrow();
+  const int nSites = haplo.ncol();
+  if (ploidy <= 0) {
+    Rcpp::stop("ploidy must be a positive integer");
+  }
+  if (nHaplo <= 0 || nSites <= 0) {
+    Rcpp::stop("haplo must have at least one row and one column");
+  }
+  if (nHaplo % ploidy != 0) {
+    Rcpp::stop("number of haplotypes must be divisible by ploidy");
+  }
+  if (pos.size() != nSites) {
+    Rcpp::stop("pos length must match ncol(haplo)");
+  }
+  if (!std::isfinite(seqLen) || seqLen <= 0.0) {
+    Rcpp::stop("seqLen must be a finite positive value");
+  }
+
+  tsk_table_collection_t *tables = new tsk_table_collection_t;
+  int ret = tsk_table_collection_init(tables, 0);
+  if (ret < 0) {
+    delete tables;
+    Rcpp::stop("Failed to initialise tsk tables: %s", tsk_strerror(ret));
+  }
+  tables->sequence_length = seqLen;
+
+  try {
+    static const char generationUnits[] = "generations";
+    ret = tsk_table_collection_set_time_units(
+      tables, generationUnits, sizeof(generationUnits) - 1);
+    if (ret < 0) {
+      Rcpp::stop("Failed to set TS time_units: %s", tsk_strerror(ret));
+    }
+
+    const int nInd = nHaplo / ploidy;
+    std::vector<tsk_id_t> individualIds;
+    individualIds.reserve(static_cast<std::size_t>(nInd));
+    for (int ind = 0; ind < nInd; ++ind) {
+      const tsk_id_t individualId = tsk_individual_table_add_row(
+        &tables->individuals,
+        0,
+        nullptr, 0,
+        nullptr, 0,
+        nullptr, 0);
+      stopIfTskError(individualId, "Failed to add individual row");
+      individualIds.push_back(individualId);
+    }
+
+    std::vector<tsk_id_t> sampleNodeIds;
+    sampleNodeIds.reserve(static_cast<std::size_t>(nHaplo));
+    for (int h = 0; h < nHaplo; ++h) {
+      const int ind = h / ploidy;
+      const tsk_id_t nodeId = tsk_node_table_add_row(
+        &tables->nodes,
+        TSK_NODE_IS_SAMPLE,
+        0.0,
+        TSK_NULL,
+        individualIds[static_cast<std::size_t>(ind)],
+        nullptr, 0);
+      stopIfTskError(nodeId, "Failed to add sample node row");
+      sampleNodeIds.push_back(nodeId);
+    }
+
+    if (addTsMut) {
+      double lastPos = -std::numeric_limits<double>::infinity();
+      for (int site = 0; site < nSites; ++site) {
+        double sitePos = pos[site];
+        if (!std::isfinite(sitePos)) {
+          Rcpp::stop("site positions must be finite");
+        }
+        if (sitePos < 0.0 || sitePos > seqLen) {
+          Rcpp::stop("site position outside [0, seqLen]");
+        }
+        if (sitePos >= seqLen) {
+          sitePos = std::nextafter(seqLen, 0.0);
+        }
+        if (sitePos <= lastPos) {
+          Rcpp::stop("site positions must be strictly increasing");
+        }
+        lastPos = sitePos;
+
+        static const char ancestralState[] = "0";
+        const tsk_id_t siteId = tsk_site_table_add_row(
+          &tables->sites,
+          sitePos,
+          ancestralState,
+          1,
+          nullptr, 0);
+        stopIfTskError(siteId, "Failed to add site row");
+
+        static const char derivedState[] = "1";
+        for (int h = 0; h < nHaplo; ++h) {
+          const int allele = haplo(h, site);
+          if (allele == NA_INTEGER || (allele != 0 && allele != 1)) {
+            Rcpp::stop("haplo entries must be 0 or 1");
+          }
+          if (allele == 1) {
+            const tsk_id_t mutationId = tsk_mutation_table_add_row(
+              &tables->mutations,
+              siteId,
+              sampleNodeIds[static_cast<std::size_t>(h)],
+              TSK_NULL,
+              TSK_UNKNOWN_TIME,
+              derivedState,
+              1,
+              nullptr, 0);
+            stopIfTskError(mutationId, "Failed to add mutation row");
+          }
+        }
+      }
+    }
+
+    ret = tsk_table_collection_sort(tables, nullptr, 0);
+    if (ret < 0) {
+      Rcpp::stop("Failed to sort table collection: %s", tsk_strerror(ret));
+    }
+    ret = tsk_table_collection_build_index(tables, 0);
+    if (ret < 0) {
+      Rcpp::stop("Failed to build table collection index: %s", tsk_strerror(ret));
+    }
+  } catch (...) {
+    tsk_table_collection_free(tables);
+    delete tables;
+    throw;
+  }
+
+  rtsk_table_collection_t out(tables, true);
+  return out;
 }
 
 // [[Rcpp::export]]

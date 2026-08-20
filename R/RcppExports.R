@@ -438,6 +438,10 @@ tsFinalizeInbredTableCollection <- function(tc, ploidy) {
     invisible(.Call(`_AlphaSimR_tsFinalizeInbredTableCollection`, tc, ploidy))
 }
 
+vcfFounderTableCollection <- function(haplo, pos, seqLen, ploidy, addTsMut) {
+    .Call(`_AlphaSimR_vcfFounderTableCollection`, haplo, pos, seqLen, ploidy, addTsMut)
+}
+
 tsForwardNodeTableAddRows <- function(tc, flags, time, population, individual) {
     .Call(`_AlphaSimR_tsForwardNodeTableAddRows`, tc, flags, time, population, individual)
 }

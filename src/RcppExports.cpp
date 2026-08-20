@@ -955,6 +955,21 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// vcfFounderTableCollection
+SEXP vcfFounderTableCollection(const Rcpp::IntegerMatrix haplo, const Rcpp::NumericVector pos, const double seqLen, const int ploidy, const bool addTsMut);
+RcppExport SEXP _AlphaSimR_vcfFounderTableCollection(SEXP haploSEXP, SEXP posSEXP, SEXP seqLenSEXP, SEXP ploidySEXP, SEXP addTsMutSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const Rcpp::IntegerMatrix >::type haplo(haploSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector >::type pos(posSEXP);
+    Rcpp::traits::input_parameter< const double >::type seqLen(seqLenSEXP);
+    Rcpp::traits::input_parameter< const int >::type ploidy(ploidySEXP);
+    Rcpp::traits::input_parameter< const bool >::type addTsMut(addTsMutSEXP);
+    rcpp_result_gen = Rcpp::wrap(vcfFounderTableCollection(haplo, pos, seqLen, ploidy, addTsMut));
+    return rcpp_result_gen;
+END_RCPP
+}
 // tsForwardNodeTableAddRows
 Rcpp::IntegerVector tsForwardNodeTableAddRows(const SEXP tc, const Rcpp::IntegerVector flags, const Rcpp::NumericVector time, const Rcpp::IntegerVector population, const Rcpp::IntegerVector individual);
 RcppExport SEXP _AlphaSimR_tsForwardNodeTableAddRows(SEXP tcSEXP, SEXP flagsSEXP, SEXP timeSEXP, SEXP populationSEXP, SEXP individualSEXP) {
@@ -1076,6 +1091,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_AlphaSimR_rtsk_treeseq_get_num_individuals2", (DL_FUNC) &_AlphaSimR_rtsk_treeseq_get_num_individuals2, 1},
     {"_AlphaSimR_tsMutateTableCollection", (DL_FUNC) &_AlphaSimR_tsMutateTableCollection, 3},
     {"_AlphaSimR_tsFinalizeInbredTableCollection", (DL_FUNC) &_AlphaSimR_tsFinalizeInbredTableCollection, 2},
+    {"_AlphaSimR_vcfFounderTableCollection", (DL_FUNC) &_AlphaSimR_vcfFounderTableCollection, 5},
     {"_AlphaSimR_tsForwardNodeTableAddRows", (DL_FUNC) &_AlphaSimR_tsForwardNodeTableAddRows, 5},
     {"_AlphaSimR_tsForwardNodeTableAddRowsWithMetadata", (DL_FUNC) &_AlphaSimR_tsForwardNodeTableAddRowsWithMetadata, 6},
     {"_AlphaSimR_tsForwardEdgeTableAddRows", (DL_FUNC) &_AlphaSimR_tsForwardEdgeTableAddRows, 5},

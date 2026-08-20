@@ -1,0 +1,631 @@
+---
+title: "Forward TS recorder: tree input versus VCF input"
+output: html_document
+date: "2026-08-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+project_root <- normalizePath(if (file.exists("DESCRIPTION")) "." else "..")
+local_lib <- file.path(project_root, ".Rlib")
+if (dir.exists(local_lib)) {
+  .libPaths(c(local_lib, .libPaths()))
+}
+library(AlphaSimR)
+library(RcppTskit)
+```
+
+This is a short companion to `dev/testTsForwardRecorder.Rmd`. It uses the same
+msprime forward-simulation parameters, but starts the founders in two ways:
+
+1. directly from `msprime_chr0.trees` and `msprime_chr1.trees`;
+2. from the matching phased VCF, `msprime_combined.vcf`, with `tsRecord=TRUE`.
+
+The final `.trees` files are not expected to be byte-identical: the tree input
+keeps the original ancestral history and source sites, while the VCF input
+initializes synthetic founder nodes from haplotypes. The VCF importer also has
+an `addTsMut` option. When `addTsMut=FALSE`, VCF marker sites are not written as
+synthetic TS mutation events; when `addTsMut=TRUE`, retained VCF marker
+positions are added as site rows and allele-1 calls are added as mutation rows
+on founder haplotype nodes. Most of this notebook uses `addTsMut=FALSE`; the
+last section compares both modes. The validation below checks the common part:
+same retained founder haplotypes, same genetic map, same forward breeding loop,
+and same forward-added inheritance edges.
+
+## Helpers
+
+These are the same validation helpers used in `testTsForwardRecorder.Rmd`,
+trimmed to the pieces needed here.
+
+```{r helpers}
+normalize_edge_df <- function(df) {
+  out <- data.frame(
+    chr = as.integer(df$chr),
+    child = as.integer(df$child),
+    parent = as.integer(df$parent),
+    left = as.numeric(df$left),
+    right = as.numeric(df$right),
+    stringsAsFactors = FALSE
+  )
+  out <- out[out$right > out$left, , drop = FALSE]
+  if (nrow(out) == 0L) {
+    return(out)
+  }
+  out <- out[order(out$chr, out$child, out$parent, out$left, out$right), , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
+collect_forward_edges_for_children <- function(recorder, chr, child_iids) {
+  chrState <- recorder$chr[[chr]]
+  tc <- chrState$tc
+  n_edge <- as.integer(tc$num_edges())
+
+  iid_keys <- ls(chrState$indMap, all.names = TRUE)
+  if (length(iid_keys) == 0L || n_edge == 0L) {
+    return(data.frame(chr = integer(), child = integer(), parent = integer(),
+                      left = numeric(), right = numeric(), stringsAsFactors = FALSE))
+  }
+
+  ind_rows <- vapply(iid_keys, function(key) {
+    as.integer(get(key, envir = chrState$indMap, inherits = FALSE))
+  }, integer(1))
+  ind_row_to_iid <- setNames(as.integer(iid_keys), as.character(ind_rows))
+
+  out <- vector("list", n_edge)
+  k <- 0L
+  for (i in seq_len(n_edge)) {
+    e <- tc$edge_table_get_row(i - 1L)
+    child_ind_row <- as.integer(tc$node_table_get_row(as.integer(e$child))$individual)
+    parent_ind_row <- as.integer(tc$node_table_get_row(as.integer(e$parent))$individual)
+    child_iid <- ind_row_to_iid[as.character(child_ind_row)]
+    parent_iid <- ind_row_to_iid[as.character(parent_ind_row)]
+
+    if (length(child_iid) == 0L || length(parent_iid) == 0L ||
+        is.na(child_iid) || is.na(parent_iid)) {
+      next
+    }
+    child_iid <- as.integer(child_iid)
+    if (!(child_iid %in% child_iids)) {
+      next
+    }
+
+    k <- k + 1L
+    out[[k]] <- data.frame(
+      chr = as.integer(chr),
+      child = child_iid,
+      parent = as.integer(parent_iid),
+      left = as.numeric(e$left),
+      right = as.numeric(e$right),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  if (k == 0L) {
+    return(data.frame(chr = integer(), child = integer(), parent = integer(),
+                      left = numeric(), right = numeric(), stringsAsFactors = FALSE))
+  }
+  do.call(rbind, out[seq_len(k)])
+}
+
+collect_forward_edges_all_chr <- function(recorder, child_iids) {
+  out <- lapply(seq_len(recorder$nChr), function(chr) {
+    collect_forward_edges_for_children(recorder, chr = chr, child_iids = child_iids)
+  })
+  normalize_edge_df(do.call(rbind, out))
+}
+
+same_gen_map <- function(a, b, tol = 1e-12) {
+  length(a) == length(b) &&
+    all(mapply(function(x, y) {
+      isTRUE(all.equal(as.numeric(x), as.numeric(y), tolerance = tol))
+    }, a, b))
+}
+
+edge_example_table <- function(tree_edges, vcf_edges, n = 8L) {
+  n <- min(n, nrow(tree_edges), nrow(vcf_edges))
+  if (n == 0L) {
+    return(data.frame())
+  }
+  data.frame(
+    row = seq_len(n),
+    chr = tree_edges$chr[seq_len(n)],
+    child = tree_edges$child[seq_len(n)],
+    parent = tree_edges$parent[seq_len(n)],
+    tree_left = tree_edges$left[seq_len(n)],
+    vcf_left = vcf_edges$left[seq_len(n)],
+    left_diff = tree_edges$left[seq_len(n)] - vcf_edges$left[seq_len(n)],
+    tree_right = tree_edges$right[seq_len(n)],
+    vcf_right = vcf_edges$right[seq_len(n)],
+    right_diff = tree_edges$right[seq_len(n)] - vcf_edges$right[seq_len(n)],
+    stringsAsFactors = FALSE
+  )
+}
+
+edge_example_table_by_chr <- function(tree_edges, vcf_edges, n = 5L) {
+  out <- lapply(split(seq_len(nrow(tree_edges)), tree_edges$chr), function(idx) {
+    chr <- tree_edges$chr[idx[[1L]]]
+    vcf_idx <- which(vcf_edges$chr == chr)
+    edge_example_table(
+      tree_edges = tree_edges[idx, , drop = FALSE],
+      vcf_edges = vcf_edges[vcf_idx, , drop = FALSE],
+      n = n
+    )
+  })
+  do.call(rbind, out)
+}
+
+run_standard_forward <- function(founder, seed = 42L) {
+  old_opts <- options(
+    AlphaSimR.tsForwardKeepSeg = FALSE,
+    AlphaSimR.tsForwardKeepRecHistGen = TRUE
+  )
+  on.exit(options(old_opts), add = TRUE)
+
+  set.seed(seed)
+  SP <- SimParam$new(founder)
+  SP$nThreads <- 1L
+  SP$quadProb <- 0
+  SP$setSexes("no")
+  SP$addTraitA(nQtlPerChr = 5, mean = 500, var = 450)
+  SP$setTrackPed(TRUE)
+  SP$setTrackRecGen(TRUE)
+
+  basePop <- newPop(founder, simParam = SP)
+  SP$setTrackTs(TRUE, founderPop = basePop)
+  basePop <- setPheno(basePop, h2 = 0.5, simParam = SP)
+
+  sim_output <- list(basePop)
+  for (cycle in seq_len(2L)) {
+    prev <- sim_output[[cycle]]
+    chosen <- selectInd(pop = prev, nInd = min(2L, nInd(prev)), use = "gv", simParam = SP)
+    offspring <- randCross(pop = chosen, nCrosses = 1L, nProgeny = 5L, simParam = SP)
+    offspring <- setPheno(pop = offspring, h2 = 0.5, simParam = SP)
+    sim_output[[cycle + 1L]] <- offspring
+  }
+
+  child_iids <- unlist(lapply(sim_output[-1L], function(pop) as.integer(pop@iid)), use.names = FALSE)
+  recorder <- attr(SP, "tsForwardRecorder", exact = TRUE)
+  edges <- collect_forward_edges_all_chr(recorder, child_iids = child_iids)
+
+  list(SP = SP, sim_output = sim_output, recorder = recorder, edges = edges)
+}
+```
+
+## Founder Imports
+
+The recombination map, `segSites`, and site-sampling seed match the msprime
+section of `testTsForwardRecorder.Rmd`.
+
+```{r imports}
+out_dir <- file.path(project_root, "dev", "testData")
+L1 <- 1e6
+L2 <- 2e6
+
+chr_info <- list(
+  list(
+    ts_path = file.path(out_dir, "msprime_chr0.trees"),
+    breaks = c(0, L1 / 2, L1),
+    rates = c(5e-5, 5e-6),
+    segSites = 60L
+  ),
+  list(
+    ts_path = file.path(out_dir, "msprime_chr1.trees"),
+    breaks = c(0, L2 / 3, 2 * L2 / 3, L2),
+    rates = c(5e-7, 5e-6, 5e-7),
+    segSites = 155L
+  )
+)
+
+stopifnot(all(file.exists(vapply(chr_info, `[[`, character(1), "ts_path"))))
+stopifnot(file.exists(file.path(out_dir, "msprime_combined.vcf")))
+
+tree_founder <- AlphaSimR:::asMapPop(
+  chr_info = chr_info,
+  inbred = FALSE,
+  ploidy = 2L,
+  site_sampling_seed = 42L,
+  returnMeta = TRUE
+)
+
+vcf_founder <- importVCF(
+  vcfFile = file.path(out_dir, "msprime_combined.vcf"),
+  breaks = list(chr0 = chr_info[[1L]]$breaks, chr1 = chr_info[[2L]]$breaks),
+  rates = list(chr0 = chr_info[[1L]]$rates, chr1 = chr_info[[2L]]$rates),
+  segSites = c(chr0 = 60L, chr1 = 155L),
+  siteSamplingSeed = 42L,
+  missing = "error",
+  tsRecord = TRUE,
+  addTsMut = FALSE,
+  returnMeta = TRUE
+)
+```
+
+## Validate Founder Equivalence
+
+```{r founder-equivalence}
+tree_hap <- pullSegSiteHaplo(tree_founder$pop, nThreads = 1L)
+vcf_hap <- pullSegSiteHaplo(vcf_founder$pop, nThreads = 1L)
+vcf_ts_summary <- lapply(vcf_founder$tsTables, rtsk_table_collection_summary2)
+
+founder_checks <- data.frame(
+  check = c(
+    "nInd",
+    "ploidy",
+    "nLoci",
+    "retained physical positions",
+    "genetic map numeric values",
+    "haplotype numeric values",
+    "VCF has TS forward source",
+    "VCF TS site tables are empty",
+    "VCF TS mutation tables are empty"
+  ),
+  passed = c(
+    tree_founder$pop@nInd == vcf_founder$pop@nInd,
+    tree_founder$pop@ploidy == vcf_founder$pop@ploidy,
+    identical(tree_founder$pop@nLoci, vcf_founder$pop@nLoci),
+    identical(unname(tree_founder$keptPosBp), unname(vcf_founder$keptPos)),
+    same_gen_map(tree_founder$pop@genMap, vcf_founder$pop@genMap),
+    identical(unname(tree_hap), unname(vcf_hap)),
+    !is.null(attr(vcf_founder$pop, "tsForwardSource", exact = TRUE)),
+    all(vapply(vcf_ts_summary, function(x) as.integer(x$num_sites) == 0L, logical(1))),
+    all(vapply(vcf_ts_summary, function(x) as.integer(x$num_mutations) == 0L, logical(1)))
+  )
+)
+knitr::kable(founder_checks)
+stopifnot(all(founder_checks$passed))
+```
+
+## Run The Same Forward Simulation
+
+```{r forward}
+tree_run <- run_standard_forward(tree_founder$pop, seed = 42L)
+vcf_run <- run_standard_forward(vcf_founder$pop, seed = 42L)
+```
+
+## Validate Forward Recorder Equivalence
+
+```{r forward-equivalence}
+tree_edges <- tree_run$edges
+vcf_edges <- vcf_run$edges
+n <- min(nrow(tree_edges), nrow(vcf_edges))
+
+edge_checks <- data.frame(
+  check = c(
+    "forward edge rows",
+    "chr/child/parent ordering",
+    "left coordinates",
+    "right coordinates"
+  ),
+  passed = c(
+    nrow(tree_edges) == nrow(vcf_edges),
+    identical(tree_edges[, c("chr", "child", "parent"), drop = FALSE],
+              vcf_edges[, c("chr", "child", "parent"), drop = FALSE]),
+    isTRUE(all.equal(tree_edges$left, vcf_edges$left, tolerance = 1e-6)),
+    isTRUE(all.equal(tree_edges$right, vcf_edges$right, tolerance = 1e-6))
+  )
+)
+knitr::kable(edge_checks)
+stopifnot(all(edge_checks$passed))
+
+edge_summary <- data.frame(
+  source = c("trees", "vcf"),
+  edge_rows = c(nrow(tree_edges), nrow(vcf_edges)),
+  max_left_diff = if (n == 0L) NA_real_ else max(abs(tree_edges$left[seq_len(n)] - vcf_edges$left[seq_len(n)])),
+  max_right_diff = if (n == 0L) NA_real_ else max(abs(tree_edges$right[seq_len(n)] - vcf_edges$right[seq_len(n)]))
+)
+knitr::kable(edge_summary, digits = 6)
+
+knitr::kable(
+  edge_example_table_by_chr(tree_edges, vcf_edges, n = 5L),
+  digits = 3,
+  format.args = list(scientific = FALSE, nsmall = 3)
+)
+```
+
+## Write Forward TS Files
+
+```{r write-trees}
+tree_paths <- AlphaSimR:::tsForwardFinalizeFromSimParam(
+  tree_run$SP,
+  out_dir = out_dir,
+  out_basename = "standard_msprime_tree_input_forward_recorder",
+  clear = TRUE
+)
+
+vcf_paths <- AlphaSimR:::tsForwardFinalizeFromSimParam(
+  vcf_run$SP,
+  out_dir = out_dir,
+  out_basename = "standard_msprime_vcf_input_forward_recorder",
+  clear = TRUE
+)
+
+tree_files <- data.frame(
+  chr = seq_along(tree_paths),
+  tree_input_path = tree_paths,
+  vcf_input_path = vcf_paths,
+  tree_exists = file.exists(tree_paths),
+  vcf_exists = file.exists(vcf_paths),
+  stringsAsFactors = FALSE
+)
+knitr::kable(tree_files)
+stopifnot(all(tree_files$tree_exists), all(tree_files$vcf_exists))
+```
+
+## Missing-Data VCF Smoke Test
+
+This uses the same two-chromosome VCF with missing genotypes. Missing sites are
+filtered before reservoir sampling. This is not expected to match the complete
+tree input at all loci, but it should still initialize founder nodes, keep TS
+site/mutation tables empty with `addTsMut=FALSE`, and record the forward
+simulation.
+
+```{r missing-vcf}
+missing_vcf <- file.path(out_dir, "msprime_combined_missing.vcf")
+stopifnot(file.exists(missing_vcf))
+
+missing_founder <- importVCF(
+  vcfFile = missing_vcf,
+  breaks = list(chr0 = chr_info[[1L]]$breaks, chr1 = chr_info[[2L]]$breaks),
+  rates = list(chr0 = chr_info[[1L]]$rates, chr1 = chr_info[[2L]]$rates),
+  segSites = c(chr0 = 40L, chr1 = 100L),
+  siteSamplingSeed = 42L,
+  missing = "filter",
+  tsRecord = TRUE,
+  addTsMut = FALSE,
+  returnMeta = TRUE
+)
+
+missing_run <- run_standard_forward(missing_founder$pop, seed = 42L)
+missing_paths <- AlphaSimR:::tsForwardFinalizeFromSimParam(
+  missing_run$SP,
+  out_dir = out_dir,
+  out_basename = "standard_msprime_vcf_missing_input_forward_recorder",
+  clear = TRUE
+)
+
+missing_summary <- data.frame(
+  nInd = missing_founder$pop@nInd,
+  ploidy = missing_founder$pop@ploidy,
+  nLoci = paste(missing_founder$pop@nLoci, collapse = ","),
+  kept = missing_founder$stats$kept,
+  skippedMissing = missing_founder$stats$skippedMissing,
+  forwardEdgeRows = nrow(missing_run$edges),
+  treeFilesWritten = all(file.exists(missing_paths)),
+  stringsAsFactors = FALSE
+)
+knitr::kable(missing_summary)
+stopifnot(missing_summary$treeFilesWritten)
+```
+
+## Python Inspection Of Generated Tree Files
+
+This mirrors the Python/tskit inspection section in `testTsForwardRecorder.Rmd`,
+but points at the newly generated tree-input, VCF-input, and missing-VCF-input
+files from this notebook.
+
+```{r py-setup}
+# Use your own path here if needed.
+reticulate::use_python("/usr/bin/python3", required = TRUE)
+library(reticulate)
+reticulate::py_config()
+```
+
+```{r python-paths}
+python_files <- data.frame(
+  label = c(
+    paste0("tree input chr", seq_along(tree_paths) - 1L),
+    paste0("vcf input chr", seq_along(vcf_paths) - 1L),
+    paste0("vcf missing input chr", seq_along(missing_paths) - 1L)
+  ),
+  source = rep(c("tree_input", "vcf_input", "vcf_missing_input"),
+               c(length(tree_paths), length(vcf_paths), length(missing_paths))),
+  chr = c(seq_along(tree_paths), seq_along(vcf_paths), seq_along(missing_paths)) - 1L,
+  path = normalizePath(c(tree_paths, vcf_paths, missing_paths), mustWork = FALSE),
+  stringsAsFactors = FALSE
+)
+knitr::kable(python_files)
+
+library(reticulate)
+files_obj <- lapply(seq_len(nrow(python_files)), function(i) {
+  as.list(python_files[i, , drop = FALSE])
+})
+reticulate::py_run_string("generated_files = r.files_obj")
+```
+
+```{python compare-generated-tree-files}
+from pathlib import Path
+import tskit
+
+for row in generated_files:
+    ts_path = Path(row["path"])
+    ts = tskit.load(ts_path)
+    print(row["label"])
+    print("  path:", ts_path)
+    print("  nodes:", ts.num_nodes)
+    print("  edges:", ts.num_edges)
+    print("  trees:", ts.num_trees)
+    print("  sites:", ts.num_sites)
+    print("  mutations:", ts.num_mutations)
+```
+
+Print the first tree for chromosome 0 from each generated input path.
+
+```{python print-first-tree}
+from pathlib import Path
+import tskit
+
+for row in generated_files:
+    if int(row["chr"]) != 0:
+        continue
+    ts_path = Path(row["path"])
+    ts = tskit.load(ts_path)
+
+    print(f"\n{row['label']}")
+    print("  path:", ts_path)
+    print("  trees:", ts.num_trees)
+    print("  nodes:", ts.num_nodes)
+    print("  edges:", ts.num_edges)
+    print(ts.first().draw_text())
+```
+
+Print one corresponding non-missing chr0 node from the tree-input and VCF-input
+outputs. The numeric node IDs differ because the tree-input output keeps the
+original source ancestry and source nodes, while the VCF-input output starts
+from synthetic founder nodes only. The AlphaSimR node metadata identifies the
+same logical node.
+
+```{python print-specific-corresponding-node}
+from pathlib import Path
+import json
+import tskit
+
+def generated_path(source, chr_index):
+    for row in generated_files:
+        if row["source"] == source and int(row["chr"]) == chr_index:
+            return Path(row["path"])
+    raise ValueError(f"No generated file for source={source}, chr={chr_index}")
+
+def alpha_node_id(node):
+    meta = node.metadata
+    if isinstance(meta, bytes):
+        meta = json.loads(meta.decode("utf-8")) if meta else {}
+    return meta.get("alphaSimR", {}).get("id")
+
+tree_chr0 = tskit.load(generated_path("tree_input", 0))
+vcf_chr0 = tskit.load(generated_path("vcf_input", 0))
+
+tree_node = tree_chr0.node(260)
+vcf_node = vcf_chr0.node(4)
+
+print(tree_node)
+print("individual:", tree_chr0.individual(tree_node.individual))
+print(vcf_node)
+print("individual:", vcf_chr0.individual(vcf_node.individual))
+
+print("  same AlphaSimR node id:", alpha_node_id(tree_node) == alpha_node_id(vcf_node))
+print("  AlphaSimR node id:", alpha_node_id(tree_node))
+print("  same flags:", tree_node.flags == vcf_node.flags)
+print("  same time:", tree_node.time == vcf_node.time)
+print("  same population:", tree_node.population == vcf_node.population)
+```
+
+Print and draw pedigrees from the generated files, following the same style as
+`testTsForwardRecorder.Rmd`.
+
+```{python print-pedigrees}
+from pathlib import Path
+import tskit
+from matplotlib import pyplot as plt
+import networkx as nx
+
+def draw_pedigree(ped_ts, title):
+    plt.figure(figsize=(8, 5))
+
+    G = nx.DiGraph()
+    for ind in ped_ts.individuals():
+        if len(ind.nodes) == 0:
+            continue
+        time = ped_ts.node(ind.nodes[0]).time
+        pop = ped_ts.node(ind.nodes[0]).population
+        G.add_node(ind.id, time=time, population=pop)
+        for p in ind.parents:
+            if p != tskit.NULL:
+                G.add_edge(ind.id, p)
+
+    pos = nx.multipartite_layout(G, subset_key="time", align="horizontal")
+    colours = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    node_colours = [
+        colours[attr["population"] % len(colours)]
+        for attr in G.nodes.values()
+    ]
+
+    nx.draw_networkx(G, pos, with_labels=True, node_color=node_colours)
+    plt.title(title)
+    plt.show()
+    plt.close()
+
+print(generated_files)
+for row in generated_files:
+    if row["label"] not in ["tree input chr1", "vcf input chr1", "vcf missing input chr1"]:
+        continue
+
+    print(row)
+    ts = tskit.load(row["path"])
+    print(f"\n{row['label']}")
+    draw_pedigree(ts, row["label"])
+```
+
+## Effect Of `addTsMut`
+
+For VCF input, `addTsMut` only controls whether retained VCF marker states are
+materialized into the initial TS site/mutation tables. It should not change the
+forward recorder's pedigree, nodes, edges, or tree intervals. With
+`addTsMut=TRUE`, the output gains:
+
+- one site row per retained VCF marker position;
+- one mutation row for each founder haplotype carrying allele `1` at that site.
+
+```{r addTsMut-comparison}
+vcf_founder_add_mut <- importVCF(
+  vcfFile = file.path(out_dir, "msprime_combined.vcf"),
+  breaks = list(chr0 = chr_info[[1L]]$breaks, chr1 = chr_info[[2L]]$breaks),
+  rates = list(chr0 = chr_info[[1L]]$rates, chr1 = chr_info[[2L]]$rates),
+  segSites = c(chr0 = 60L, chr1 = 155L),
+  siteSamplingSeed = 42L,
+  missing = "error",
+  tsRecord = TRUE,
+  addTsMut = TRUE,
+  returnMeta = TRUE
+)
+
+vcf_run_add_mut <- run_standard_forward(vcf_founder_add_mut$pop, seed = 42L)
+vcf_paths_add_mut <- AlphaSimR:::tsForwardFinalizeFromSimParam(
+  vcf_run_add_mut$SP,
+  out_dir = out_dir,
+  out_basename = "standard_msprime_vcf_addTsMut_forward_recorder",
+  clear = TRUE
+)
+
+tskit <- reticulate::import("tskit")
+ts_counts <- function(paths, addTsMut) {
+  do.call(rbind, lapply(seq_along(paths), function(i) {
+    ts <- tskit$load(paths[[i]])
+    data.frame(
+      addTsMut = addTsMut,
+      chr = i - 1L,
+      nodes = as.integer(ts$num_nodes),
+      edges = as.integer(ts$num_edges),
+      trees = as.integer(ts$num_trees),
+      sites = as.integer(ts$num_sites),
+      mutations = as.integer(ts$num_mutations),
+      stringsAsFactors = FALSE
+    )
+  }))
+}
+
+addTsMut_counts <- rbind(
+  ts_counts(vcf_paths, addTsMut = FALSE),
+  ts_counts(vcf_paths_add_mut, addTsMut = TRUE)
+)
+knitr::kable(addTsMut_counts)
+
+addTsMut_wide <- merge(
+  addTsMut_counts[addTsMut_counts$addTsMut == FALSE, ],
+  addTsMut_counts[addTsMut_counts$addTsMut == TRUE, ],
+  by = "chr",
+  suffixes = c("_false", "_true")
+)
+addTsMut_checks <- data.frame(
+  chr = addTsMut_wide$chr,
+  same_nodes = addTsMut_wide$nodes_false == addTsMut_wide$nodes_true,
+  same_edges = addTsMut_wide$edges_false == addTsMut_wide$edges_true,
+  same_trees = addTsMut_wide$trees_false == addTsMut_wide$trees_true,
+  sites_added = addTsMut_wide$sites_false == 0L & addTsMut_wide$sites_true > 0L,
+  mutations_added = addTsMut_wide$mutations_false == 0L & addTsMut_wide$mutations_true > 0L,
+  stringsAsFactors = FALSE
+)
+knitr::kable(addTsMut_checks)
+stopifnot(all(addTsMut_checks[, -1L]))
+```
