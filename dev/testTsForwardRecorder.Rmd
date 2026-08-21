@@ -22,7 +22,7 @@ It uses the same forward simulation pattern as `dev/notesRealBreakpoints.md`:
 
 Two founder entry points are shown:
 
-1. start from `runMacTS(...)`,
+1. start from `runMacsTS(...)`,
 2. start from existing msprime `.trees` files.
 
 ### Main workflow differences between old "bridge" and forward ts recorder:
@@ -34,7 +34,7 @@ Two founder entry points are shown:
 | Main stored object during simulation | `SP$recHistGen` | `attr(SP, "tsForwardRecorder")` |
 | Segment data kept by default | Reconstructed later for bridge output | Not kept by default |
 | Role of `SP$pedigree` | Used with `recHistGen` to reconstruct child-parent edge relationships after simulation | Still used for TS individual parent links, node times, and default sample inference, but not as the main source of inheritance edges |
-| Recombination map source | Supplied in validation `chr_info` when bridge converts `recHistGen` to coordinates | Stored on the founder as `tsForwardPosMeta`; from `runMacTS()` defaults/`-R` or explicit `asMapPop(chr_info)` maps |
+| Recombination map source | Supplied in validation `chr_info` when bridge converts `recHistGen` to coordinates | Stored on the founder as `tsForwardPosMeta`; from `runMacsTS()` defaults/`-R` or explicit `asMapPop(chr_info)` maps |
 | User output function | `bridgeWriteTrees()` | `tsForwardFinalizeFromSimParam()` |
 | Metadata timing | Added when bridge writes trees | Added while recording nodes/individuals |
 | Edge append path | R row loop | C++ bulk append |
@@ -341,18 +341,18 @@ find_extra_recHistGen_example <- function(SP) {
 }
 ```
 
-## 3) Entry Point A: Start With `runMacTS`
+## 3) Entry Point A: Start With `runMacsTS`
 
-`runMacTS()` returns a `MapPop` plus TS table pointers when `returnTs=TRUE`.
+`runMacsTS()` returns a `MapPop` plus TS table pointers when `returnTs=TRUE`.
 For the new direct recorder path, use `mac_out$pop` directly. The extra
 file-backed `chr_info` below is only for the old bridge comparison functions,
 because those functions still expect `chr_info[[cc]]$ts_path`.
 
-```{r runMacTS-founders}
+```{r runMacsTS-founders}
 set.seed(42)
 
-# Step 1A: create founder tree sequences with runMacTS.
-mac_out <- AlphaSimR:::runMacTS(
+# Step 1A: create founder tree sequences with runMacsTS.
+mac_out <- AlphaSimR:::runMacsTS(
   nInd = 4,
   nChr = 2,
   segSites = c(60L, 120L),
@@ -365,22 +365,22 @@ mac_out <- AlphaSimR:::runMacTS(
   returnTs = TRUE
 )
 
-# Direct forward-recorder input: use the MapPop returned by runMacTS.
+# Direct forward-recorder input: use the MapPop returned by runMacsTS.
 mac_founder <- mac_out$pop
 
 # Old bridge input: bridgeCollectSegGenFromSimOutput()/bridgeWriteTrees() still
 # use chr_info[[cc]]$ts_path, so this validation-only helper writes the in-memory
-# runMacTS founder tables to files and reconstructs the bridge rate map.
-mac_bridge_chr_info <- AlphaSimR:::runMacTSBridgeChrInfo(
+# runMacsTS founder tables to files and reconstructs the bridge rate map.
+mac_bridge_chr_info <- AlphaSimR:::runMacsTSBridgeChrInfo(
   mac_out,
   out_dir = out_dir,
-  out_basename = "runMacTS_founder"
+  out_basename = "runMacsTS_founder"
 )
 ```
 
 ### Forward Simulation With Direct TS Recorder
 
-```{r runMacTS-forward}
+```{r runMacsTS-forward}
 # Step 2A: run the forward simulator and let the direct TS recorder update
 # tables during meiosis. Keep recHistGen only for validation against the old
 # bridge path.
@@ -451,7 +451,7 @@ Expected result:
 - the direct and bridge `.trees` files should have matching forward-added edge
   structure and can be inspected further with Python/tskit.
 
-```{r runMacTS-compare}
+```{r runMacsTS-compare}
 mac_cmp <- compare_direct_vs_bridge_edges(
   recorder = mac_recorder,
   SP = mac_SP,
@@ -468,11 +468,11 @@ knitr::kable(edge_example_table_by_chr(mac_cmp, n = 5L), digits = 3,
 
 ### Write Comparable Tree Files
 
-```{r runMacTS-write-trees}
+```{r runMacsTS-write-trees}
 mac_direct_paths <- tsForwardFinalizeFromSimParam(
   mac_SP,
   out_dir = out_dir,
-  out_basename = "runMacTS_direct",
+  out_basename = "runMacsTS_direct",
   clear = FALSE
 )
 
@@ -480,7 +480,7 @@ mac_direct_paths <- tsForwardFinalizeFromSimParam(
 mac_direct_simplified_paths <- tsForwardFinalizeFromSimParam(
   mac_SP,
   out_dir = out_dir,
-  out_basename = "runMacTS_direct_simplified_keep_unary",
+  out_basename = "runMacsTS_direct_simplified_keep_unary",
   simplify = TRUE,
   keep_unary = TRUE,
   clear = FALSE
@@ -498,9 +498,9 @@ bridgeWriteTrees(
   edgeDf = mac_bridge_df,
   SP = mac_SP,
   out_dir = out_dir,
-  out_basename = "runMacTS_bridge"
+  out_basename = "runMacsTS_bridge"
 )
-mac_bridge_paths <- file.path(out_dir, paste0("runMacTS_bridge_chr", seq_along(mac_bridge_chr_info) - 1L, ".trees"))
+mac_bridge_paths <- file.path(out_dir, paste0("runMacsTS_bridge_chr", seq_along(mac_bridge_chr_info) - 1L, ".trees"))
 
 mac_tree_paths <- data.frame(
   chr = seq_along(mac_bridge_chr_info),
@@ -753,7 +753,7 @@ reticulate::py_config()
 
 ```{r python-paths}
 python_pairs <- data.frame(
-  label = c("runMacTS chr0", "runMacTS chr1", "msprime chr0", "msprime chr1"),
+  label = c("runMacsTS chr0", "runMacsTS chr1", "msprime chr0", "msprime chr1"),
   direct_path = normalizePath(all_tree_paths$direct_path, mustWork = FALSE),
   bridge_path = normalizePath(all_tree_paths$bridge_path, mustWork = FALSE),
   stringsAsFactors = FALSE
@@ -867,7 +867,7 @@ def draw_pedigree(ped_ts, title):
 
 print(pairs)
 for row in pairs:
-    if row["label"] not in ["msprime chr1", "runMacTS chr1"]:
+    if row["label"] not in ["msprime chr1", "runMacsTS chr1"]:
         continue
     #print(row)
     paths = {
@@ -887,7 +887,7 @@ for row in pairs:
 
 This section checks how recombination-map information is carried from founder
 generation into the forward simulation and the direct TS recorder. When
-`runMacTS()` is run with a MaCS `-R` hotspot file, the resulting founder keeps
+`runMacsTS()` is run with a MaCS `-R` hotspot file, the resulting founder keeps
 that map metadata, so the forward recorder can use it without additional user
 input. When `asMapPop(chr_info = list(..., breaks = ..., rates = ...))` is used,
 the explicit `breaks/rates` input controls the founder `genMap` used by the
@@ -902,10 +902,10 @@ an explicit non-constant map for the forward stage.
 
 The four cases are:
 
-1. constant recombination map from the normal `runMacTS()` path,
-2. constant-rate `runMacTS()` ancestry rebuilt with explicit hotspot
+1. constant recombination map from the normal `runMacsTS()` path,
+2. constant-rate `runMacsTS()` ancestry rebuilt with explicit hotspot
    `breaks/rates` for the forward simulation,
-3. MaCS `-R` hotspot file parsed automatically by `runMacTS()`,
+3. MaCS `-R` hotspot file parsed automatically by `runMacsTS()`,
 4. MaCS `-R` ancestry tables rebuilt with explicit `breaks/rates` through
    `asMapPop(chr_info = list(tables = ...))`.
 
@@ -924,7 +924,7 @@ recomb_test_n_crosses <- 3L
 recomb_test_n_progeny <- 5L
 recomb_test_ploidy <- 2L
 recomb_test_hotspot_lines <- c("0.2 0.3 5", "0.6 0.8 0.1")
-recomb_test_hotspot_path <- file.path(out_dir, "runMacTS_hotspots_for_window_counts.txt")
+recomb_test_hotspot_path <- file.path(out_dir, "runMacsTS_hotspots_for_window_counts.txt")
 
 edge_start_window_counts <- function(edges, seq_len, window_bp = 1e7) {
   starts <- seq(0, seq_len - window_bp, by = window_bp)
@@ -1011,7 +1011,7 @@ runmacts_recombination_map_replicate <- function(rep_id) {
     "-R", recomb_test_hotspot_path
   )
 
-  explicit_forward_map <- AlphaSimR:::.runMacTS_map_from_hotspots(
+  explicit_forward_map <- AlphaSimR:::.runMacsTS_map_from_hotspots(
     path = recomb_test_hotspot_path,
     nChr = 1,
     seqLen = bp,
@@ -1024,7 +1024,7 @@ runmacts_recombination_map_replicate <- function(rep_id) {
   constant_site_seed <- as.integer(30000L + rep_id)
 
   run_constant_macs <- function() {
-    AlphaSimR:::runMacTS(
+    AlphaSimR:::runMacsTS(
       nInd = 4,
       nChr = 1,
       segSites = seg_sites,
@@ -1042,7 +1042,7 @@ runmacts_recombination_map_replicate <- function(rep_id) {
   }
 
   # Group 1 source: constant-rate MaCS ancestry with the default constant
-  # forward map retained from runMacTS().
+  # forward map retained from runMacsTS().
   constant_out <- run_constant_macs()
 
   # Group 2 source: an independent copy of the same constant-rate MaCS
@@ -1069,7 +1069,7 @@ runmacts_recombination_map_replicate <- function(rep_id) {
   hotspot_site_seed <- as.integer(50000L + rep_id)
 
   run_hotspot_macs <- function() {
-    AlphaSimR:::runMacTS(
+    AlphaSimR:::runMacsTS(
       nInd = 4,
       nChr = 1,
       segSites = seg_sites,
@@ -1087,7 +1087,7 @@ runmacts_recombination_map_replicate <- function(rep_id) {
     )
   }
 
-  # Group 3 source: MaCS -R ancestry where runMacTS() automatically retains
+  # Group 3 source: MaCS -R ancestry where runMacsTS() automatically retains
   # the hotspot map metadata for the forward simulation.
   hotspot_out_auto <- run_hotspot_macs()
 
@@ -1151,7 +1151,7 @@ expected_n_meioses <- recomb_test_n_forward_gen *
   recomb_test_n_progeny *
   recomb_test_ploidy
 
-expected_hotspot_map <- AlphaSimR:::.runMacTS_map_from_hotspots(
+expected_hotspot_map <- AlphaSimR:::.runMacsTS_map_from_hotspots(
   path = recomb_test_hotspot_path,
   nChr = 1,
   seqLen = recomb_test_bp,
@@ -1287,7 +1287,7 @@ ggplot(
 
 This is the clean forward-recorder workflow without bridge validation,
 `recHistGen`, saved `tsSegGen`, or comparison helpers. It shows both standard
-entry points: start from `runMacTS()` or start from existing msprime `.trees`
+entry points: start from `runMacsTS()` or start from existing msprime `.trees`
 files. In both cases, the user-facing process is:
 
 1. create founders,
@@ -1308,8 +1308,8 @@ standard_runmacts_tree_paths <- local({
 
   set.seed(42)
 
-  # 1. Create founders from runMacTS.
-  standard_mac_out <- AlphaSimR:::runMacTS(
+  # 1. Create founders from runMacsTS.
+  standard_mac_out <- AlphaSimR:::runMacsTS(
     nInd = 4,
     nChr = 2,
     segSites = c(60L, 120L),
@@ -1350,13 +1350,13 @@ standard_runmacts_tree_paths <- local({
   standard_original_paths <- AlphaSimR:::tsForwardFinalizeFromSimParam(
     standard_SP,
     out_dir = standard_out_dir,
-    out_basename = "standard_runMacTS_forward_recorder",
+    out_basename = "standard_runMacsTS_forward_recorder",
     clear = FALSE
   )
   standard_simplified_paths <- AlphaSimR:::tsForwardFinalizeFromSimParam(
     standard_SP,
     out_dir = standard_out_dir,
-    out_basename = "standard_runMacTS_forward_recorder_simplified",
+    out_basename = "standard_runMacsTS_forward_recorder_simplified",
     simplify = TRUE,
     keep_unary = TRUE,
     clear = TRUE

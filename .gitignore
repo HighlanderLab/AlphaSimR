@@ -41,12 +41,16 @@ testData/out_msprime_from_macs/*.trees
 dev/testData/out_phase1_useMacsMut_FALSE/*.trees
 dev/testData/out_msprime_from_macs/*.trees
 dev/testData/AlphaSimR_extended_TS_*.trees
+dev/testData/inbred_test.trees
 dev/testData/forward_*.trees
 dev/testData/msprime_bridge_*.trees
 dev/testData/msprime_direct_*.trees
 dev/testData/runMacTS_bridge_*.trees
 dev/testData/runMacTS_direct_*.trees
 dev/testData/runMacTS_founder_*.trees
+dev/testData/runMacsTS_bridge_*.trees
+dev/testData/runMacsTS_direct_*.trees
+dev/testData/runMacsTS_founder_*.trees
 dev/testData/standard_forward_recorder_*.trees
 dev/testData/standard_*_forward_recorder_*.trees
 dev/testData/standard_msprime_*_input_forward_recorder_*.trees
@@ -54,7 +58,6 @@ dev/testData/standard_msprime_vcf_addTsMut_forward_recorder_*.trees
 !dev/testData/*.vcf
 !dev/testData/AlphaSimR_extended_chr*.trees
 !dev/testData/MaCSTS*.trees
-!dev/testData/inbred_test.trees
 !dev/testData/msprime_chr*.trees
 dev/testData/*_pairs.json
 dev/testData/hotspots*.txt

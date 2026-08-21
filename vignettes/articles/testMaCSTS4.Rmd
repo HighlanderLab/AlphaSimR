@@ -15,14 +15,14 @@ based on `testMaCSTS1.Rmd`, `testMaCSTS2.Rmd`, and `testMaCSTS3.Rmd`.
 
 It starts from the two supported ways to run:
 
-1. high-level wrapper: `runMacTS(...)`
+1. high-level wrapper: `runMacsTS(...)`
 2. staged low-level path (for developers and advanced users): `simAnc(...) -> simMut(...) -> finalizeInbredTs(...) -> asMapPop(...)`
 
 ## 1) Two Ways To Run
 
-### A. High-level wrapper (`runMacTS`)
+### A. High-level wrapper (`runMacsTS`)
 
-`runMacTS` is the default user-facing entry point. It is designed to feel like
+`runMacsTS` is the default user-facing entry point. It is designed to feel like
 `runMacs/runMacs2` but with TS-aware internals and mode control.
 
 - Builds MaCS command from species/manual inputs
@@ -43,7 +43,7 @@ This path is for development/debugging and explicit control over each stage.
 
 ```{r relationship-diagram, results='asis'}
 cat("
-runMacTS()
+runMacsTS()
   ├─ command builder (species/manual)
   ├─ mutationMode = 'macs'  -> MaCSTS(..., useMacsMut=TRUE, expandInbredSamples=FALSE)
   ├─ mutationMode = 'postTs'-> simAnc(...) -> simMut(...)
@@ -76,13 +76,13 @@ param_effects <- data.frame(
     "nThreads"
   ),
   where_used = c(
-    "runMacTS",
+    "runMacsTS",
     "MaCSTS",
     "MaCSTS/asMapPop",
     "MaCSTS (timeScale)",
     "asMapPop",
     "MaCSTS/asMapPop/finalizeInbredTs",
-    "runMacTS/finalizeInbredTs",
+    "runMacsTS/finalizeInbredTs",
     "simAnc/MaCSTS ancestry RNG",
     "simMut post-TS RNG",
     "MaCS chromosomes + asMapPop worker"
@@ -175,11 +175,11 @@ print_wrapper_vs_staged <- function(cmp) {
 
 ### A. High-level wrapper mode
 
-```{r ex-runMacTS}
+```{r ex-runMacsTS}
 library(AlphaSimR)
 devtools::load_all()
 set.seed(1)
-out <- AlphaSimR:::runMacTS(
+out <- AlphaSimR:::runMacsTS(
   nInd = 4,
   nChr = 2,
   segSites = 60,
@@ -192,7 +192,7 @@ out <- AlphaSimR:::runMacTS(
   returnTs = TRUE
 )
 
-# runMacTS returns:
+# runMacsTS returns:
 # out$pop      -> MapPop
 # out$tables   -> TS table collections (if returnTs=TRUE)
 ```
@@ -241,7 +241,7 @@ pop <- AlphaSimR:::asMapPop(
 
 ```{r wrapper-vs-staged-equivalence}
 # Reuse objects from the previous ection:
-# - out  : runMacTS(...) result
+# - out  : runMacsTS(...) result
 # - mut  : simMut(...) result from staged path
 # - pop  : asMapPop(...) result from staged path
 
@@ -261,7 +261,7 @@ print_wrapper_vs_staged(cmp)
 ```{r wrapper-vs-staged-inbred}
 # Example: inbred TRUE with ploidy 2
 set.seed(1)
-out_inbred <- AlphaSimR:::runMacTS(
+out_inbred <- AlphaSimR:::runMacsTS(
   nInd = 4,
   nChr = 2,
   segSites = 60,
@@ -364,4 +364,4 @@ Sampled nodes are duplicated as expected for inbred/ploidy expansion, from nodes
 
 
 ### Parameter sensitivity checks
-In tests/testthat/test-runMacTS-sensitivity.R
+In tests/testthat/test-runMacsTS-sensitivity.R

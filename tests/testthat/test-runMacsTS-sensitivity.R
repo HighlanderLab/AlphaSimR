@@ -1,4 +1,4 @@
-context("runMacTS wrapper and parameter sensitivity")
+context("runMacsTS wrapper and parameter sensitivity")
 
 skip_if_not_installed("RcppTskit")
 
@@ -104,8 +104,8 @@ expect_wrapper_staged_equal <- function(out, staged) {
   }
 }
 
-test_that("runMacTS(postTs) wrapper matches staged workflow (outbred)", {
-  out <- AlphaSimR:::runMacTS(
+test_that("runMacsTS(postTs) wrapper matches staged workflow (outbred)", {
+  out <- AlphaSimR:::runMacsTS(
     nInd = 4,
     nChr = 2,
     segSites = 60,
@@ -135,8 +135,8 @@ test_that("runMacTS(postTs) wrapper matches staged workflow (outbred)", {
   expect_wrapper_staged_equal(out, staged)
 })
 
-test_that("runMacTS(postTs) wrapper matches staged workflow (inbred, ploidy > 1)", {
-  out <- AlphaSimR:::runMacTS(
+test_that("runMacsTS(postTs) wrapper matches staged workflow (inbred, ploidy > 1)", {
+  out <- AlphaSimR:::runMacsTS(
     nInd = 4,
     nChr = 2,
     segSites = 60,
@@ -168,7 +168,7 @@ test_that("runMacTS(postTs) wrapper matches staged workflow (inbred, ploidy > 1)
 })
 
 test_that("mutationMode='none' returns ancestry-only TS", {
-  out <- AlphaSimR:::runMacTS(
+  out <- AlphaSimR:::runMacsTS(
     nInd = 4,
     nChr = 2,
     inbred = FALSE,
@@ -209,8 +209,8 @@ test_that("usePhysicalPositions changes coordinate scale while keeping sampled o
     siteSamplingSeed = 42L,
     returnTs = TRUE
   )
-  out_unit <- do.call(AlphaSimR:::runMacTS, c(common, list(usePhysicalPositions = FALSE)))
-  out_bp <- do.call(AlphaSimR:::runMacTS, c(common, list(usePhysicalPositions = TRUE)))
+  out_unit <- do.call(AlphaSimR:::runMacsTS, c(common, list(usePhysicalPositions = FALSE)))
+  out_bp <- do.call(AlphaSimR:::runMacsTS, c(common, list(usePhysicalPositions = TRUE)))
   
   s_unit <- tc_summary(out_unit$tables[[1]])
   s_bp <- tc_summary(out_bp$tables[[1]])
@@ -231,8 +231,8 @@ test_that("usePhysicalPositions changes coordinate scale while keeping sampled o
   expect_true(isTRUE(all.equal(out_unit$pop@genMap[[1]], out_bp$pop@genMap[[1]], tolerance = 1e-12)))
 })
 
-test_that("runMacTSBridgeChrInfo reuses runMacTS map metadata", {
-  out <- AlphaSimR:::runMacTS(
+test_that("runMacsTSBridgeChrInfo reuses runMacsTS map metadata", {
+  out <- AlphaSimR:::runMacsTS(
     nInd = 4,
     nChr = 2,
     segSites = c(40L, 40L),
@@ -248,7 +248,7 @@ test_that("runMacTSBridgeChrInfo reuses runMacTS map metadata", {
     returnTs = TRUE
   )
   out_dir <- tempfile("mac_bridge_chr_info_")
-  chr_info <- AlphaSimR:::runMacTSBridgeChrInfo(out, out_dir = out_dir)
+  chr_info <- AlphaSimR:::runMacsTSBridgeChrInfo(out, out_dir = out_dir)
 
   pos_meta <- attr(out$pop, "tsForwardPosMeta", exact = TRUE)
 
@@ -259,12 +259,12 @@ test_that("runMacTSBridgeChrInfo reuses runMacTS map metadata", {
   expect_equal(vapply(chr_info, `[[`, integer(1), "segSites"), out$pop@nLoci)
 })
 
-test_that("runMacTS converts MaCS -R hotspot file into breaks/rates metadata", {
+test_that("runMacsTS converts MaCS -R hotspot file into breaks/rates metadata", {
   hotspot_path <- tempfile("macs_hotspot_", fileext = ".txt")
   writeLines("0.25 0.5 3", hotspot_path)
   on.exit(unlink(hotspot_path, force = TRUE), add = TRUE)
 
-  out <- AlphaSimR:::runMacTS(
+  out <- AlphaSimR:::runMacsTS(
     nInd = 4,
     nChr = 1,
     segSites = 30L,
@@ -320,12 +320,12 @@ test_that("asMapPop requires breaks/rates for external tree input", {
   )
 })
 
-test_that("Nref rescales TS times in runMacTS ancestry-only mode", {
+test_that("Nref rescales TS times in runMacsTS ancestry-only mode", {
   seed <- as.integer(42)
   nref <- 10000
   scale <- 4 * nref
   
-  out_unit <- AlphaSimR:::runMacTS(
+  out_unit <- AlphaSimR:::runMacsTS(
     nInd = 4,
     nChr = 1,
     inbred = FALSE,
@@ -338,7 +338,7 @@ test_that("Nref rescales TS times in runMacTS ancestry-only mode", {
     seed = seed,
     returnTs = TRUE
   )
-  out_gen <- AlphaSimR:::runMacTS(
+  out_gen <- AlphaSimR:::runMacsTS(
     nInd = 4,
     nChr = 1,
     inbred = FALSE,
@@ -370,7 +370,7 @@ test_that("Nref rescales TS times in runMacTS ancestry-only mode", {
 })
 
 test_that("expandInbredTs toggles inbred leaf expansion in TS", {
-  out_no_expand <- AlphaSimR:::runMacTS(
+  out_no_expand <- AlphaSimR:::runMacsTS(
     nInd = 4,
     nChr = 1,
     inbred = TRUE,
@@ -383,7 +383,7 @@ test_that("expandInbredTs toggles inbred leaf expansion in TS", {
     seed = as.integer(7),
     returnTs = TRUE
   )
-  out_expand <- AlphaSimR:::runMacTS(
+  out_expand <- AlphaSimR:::runMacsTS(
     nInd = 4,
     nChr = 1,
     inbred = TRUE,
@@ -410,4 +410,54 @@ test_that("expandInbredTs toggles inbred leaf expansion in TS", {
   n_sample_1 <- sample_node_count(out_expand$tables[[1]])
   expect_equal(n_sample_0, 4L)
   expect_equal(n_sample_1, 8L)
+})
+
+test_that("runMacTS compatibility aliases dispatch to runMacsTS", {
+  out_new <- AlphaSimR:::runMacsTS(
+    nInd = 4,
+    nChr = 1,
+    inbred = FALSE,
+    ploidy = 2L,
+    species = "GENERIC",
+    mutationMode = "none",
+    usePhysicalPositions = FALSE,
+    nThreads = 1L,
+    seed = as.integer(11),
+    returnTs = TRUE
+  )
+  out_old <- AlphaSimR:::runMacTS(
+    nInd = 4,
+    nChr = 1,
+    inbred = FALSE,
+    ploidy = 2L,
+    species = "GENERIC",
+    mutationMode = "none",
+    usePhysicalPositions = FALSE,
+    nThreads = 1L,
+    seed = as.integer(11),
+    returnTs = TRUE
+  )
+
+  expect_equal(tc_summary(out_old$tables[[1]])$num_nodes,
+               tc_summary(out_new$tables[[1]])$num_nodes)
+  expect_equal(tc_summary(out_old$tables[[1]])$num_edges,
+               tc_summary(out_new$tables[[1]])$num_edges)
+
+  out_new_pop <- AlphaSimR:::runMacsTS(
+    nInd = 4,
+    nChr = 1,
+    inbred = FALSE,
+    ploidy = 2L,
+    species = "GENERIC",
+    mutationMode = "postTs",
+    nThreads = 1L,
+    seed = as.integer(11),
+    returnTs = TRUE
+  )
+  tmp <- tempdir()
+  chr_info <- AlphaSimR:::runMacTSBridgeChrInfo(out_new_pop, out_dir = tmp)
+  expect_true(file.exists(chr_info[[1L]]$ts_path))
+  expect_true(grepl("runMacTS_founder_chr0[.]trees$",
+                    chr_info[[1L]]$ts_path))
+  unlink(chr_info[[1L]]$ts_path, force = TRUE)
 })

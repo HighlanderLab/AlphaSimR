@@ -171,7 +171,7 @@ finalizeInbredTs <- function(x, inbred = FALSE, ploidy = 2L) {
 #' @return List with `command`, `genLen`, and `seqLen`.
 #' @keywords internal
 #' @noRd
-.runMacTS_build_command <- function(nInd, inbred, species, split, ploidy,
+.runMacsTS_build_command <- function(nInd, inbred, species, split, ploidy,
                                     manualCommand, manualGenLen, nChr) {
   popSize <- ifelse(inbred, nInd, ploidy * nInd)
   if (!is.null(manualCommand)) {
@@ -248,7 +248,7 @@ finalizeInbredTs <- function(x, inbred = FALSE, ploidy = 2L) {
   list(command = command, genLen = as.numeric(genLen), seqLen = seqLen)
 }
 
-.runMacTS_hotspot_path <- function(args) {
+.runMacsTS_hotspot_path <- function(args) {
   tokens <- strsplit(as.character(args), "[,[:space:]]+", perl = TRUE)[[1L]]
   tokens <- tokens[nzchar(tokens)]
   idx <- match("-R", tokens)
@@ -258,7 +258,7 @@ finalizeInbredTs <- function(x, inbred = FALSE, ploidy = 2L) {
   tokens[[idx + 1L]]
 }
 
-.runMacTS_read_hotspot_map <- function(path) {
+.runMacsTS_read_hotspot_map <- function(path) {
   if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)) {
     stop("Invalid MaCS -R hotspot file path", call. = FALSE)
   }
@@ -284,8 +284,8 @@ finalizeInbredTs <- function(x, inbred = FALSE, ploidy = 2L) {
   hot
 }
 
-.runMacTS_map_from_hotspots <- function(path, nChr, seqLen, genLen, usePhysicalPositions) {
-  hot <- .runMacTS_read_hotspot_map(path)
+.runMacsTS_map_from_hotspots <- function(path, nChr, seqLen, genLen, usePhysicalPositions) {
+  hot <- .runMacsTS_read_hotspot_map(path)
   coordLen <- if (isTRUE(usePhysicalPositions)) as.numeric(seqLen) else 1
   starts <- coordLen * hot$start
   ends <- coordLen * hot$end
@@ -304,10 +304,10 @@ finalizeInbredTs <- function(x, inbred = FALSE, ploidy = 2L) {
   )
 }
 
-.runMacTS_resolve_rec_map <- function(args, nChr, seqLen, genLen, usePhysicalPositions) {
-  hotspotPath <- .runMacTS_hotspot_path(args)
+.runMacsTS_resolve_rec_map <- function(args, nChr, seqLen, genLen, usePhysicalPositions) {
+  hotspotPath <- .runMacsTS_hotspot_path(args)
   if (!is.null(hotspotPath)) {
-    return(.runMacTS_map_from_hotspots(
+    return(.runMacsTS_map_from_hotspots(
       path = hotspotPath,
       nChr = nChr,
       seqLen = seqLen,
@@ -354,7 +354,7 @@ finalizeInbredTs <- function(x, inbred = FALSE, ploidy = 2L) {
 #' @return `MapPop` by default; otherwise a list with `pop`, `tables`, and metadata.
 #' @keywords internal
 #' @noRd
-runMacTS <- function(nInd, nChr = 1, segSites = NULL, inbred = FALSE,
+runMacsTS <- function(nInd, nChr = 1, segSites = NULL, inbred = FALSE,
                      species = "GENERIC", split = NULL, ploidy = 2L,
                      manualCommand = NULL, manualGenLen = NULL, nThreads = NULL,
                      mutationMode = c("postTs", "macs", "none"),
@@ -386,7 +386,7 @@ runMacTS <- function(nInd, nChr = 1, segSites = NULL, inbred = FALSE,
     }
   }
   
-  setup <- .runMacTS_build_command(
+  setup <- .runMacsTS_build_command(
     nInd = nInd,
     inbred = inbred,
     species = species,
@@ -484,7 +484,7 @@ runMacTS <- function(nInd, nChr = 1, segSites = NULL, inbred = FALSE,
          ". Increase mutation rate or inspect TS via returnTs=TRUE.")
   }
   
-  recMap <- .runMacTS_resolve_rec_map(
+  recMap <- .runMacsTS_resolve_rec_map(
     args = args,
     nChr = nChr,
     seqLen = seqLen,
@@ -522,14 +522,14 @@ runMacTS <- function(nInd, nChr = 1, segSites = NULL, inbred = FALSE,
   )
 }
 
-#' Build file-backed bridge chromosome info from a runMacTS result
+#' Build file-backed bridge chromosome info from a runMacsTS result
 #'
-#' `runMacTS(..., returnTs = TRUE)` keeps founder tables in memory, while the
+#' `runMacsTS(..., returnTs = TRUE)` keeps founder tables in memory, while the
 #' old bridge validation path expects `chr_info[[cc]]$ts_path`. This helper
 #' writes those tables to `.trees` files and reuses the map metadata stored by
 #' `asMapPop()`.
 #'
-#' @param x List returned by `runMacTS(..., returnTs = TRUE)`.
+#' @param x List returned by `runMacsTS(..., returnTs = TRUE)`.
 #' @param out_dir Directory where founder `.trees` files should be written.
 #' @param out_basename Prefix for written founder tree files.
 #' @param segSites Optional scalar or per-chromosome site counts for returned
@@ -539,10 +539,10 @@ runMacTS <- function(nInd, nChr = 1, segSites = NULL, inbred = FALSE,
 #'   and `segSites`.
 #' @keywords internal
 #' @noRd
-runMacTSBridgeChrInfo <- function(x, out_dir, out_basename = "runMacTS_founder",
+runMacsTSBridgeChrInfo <- function(x, out_dir, out_basename = "runMacsTS_founder",
                                   segSites = NULL) {
   if (!is.list(x) || is.null(x$pop) || is.null(x$tables)) {
-    stop("x must be the list returned by runMacTS(..., returnTs = TRUE)", call. = FALSE)
+    stop("x must be the list returned by runMacsTS(..., returnTs = TRUE)", call. = FALSE)
   }
   pop <- x$pop
   tables <- x$tables
@@ -608,3 +608,22 @@ runMacTSBridgeChrInfo <- function(x, out_dir, out_basename = "runMacTS_founder",
     )
   })
 }
+
+# Backward-compatible development aliases for the earlier runMacTS spelling.
+runMacTS <- function(...) {
+  runMacsTS(...)
+}
+
+runMacTSBridgeChrInfo <- function(x, out_dir, out_basename = "runMacTS_founder",
+                                  segSites = NULL) {
+  runMacsTSBridgeChrInfo(x=x,
+                         out_dir=out_dir,
+                         out_basename=out_basename,
+                         segSites=segSites)
+}
+
+.runMacTS_build_command <- .runMacsTS_build_command
+.runMacTS_hotspot_path <- .runMacsTS_hotspot_path
+.runMacTS_read_hotspot_map <- .runMacsTS_read_hotspot_map
+.runMacTS_map_from_hotspots <- .runMacsTS_map_from_hotspots
+.runMacTS_resolve_rec_map <- .runMacsTS_resolve_rec_map

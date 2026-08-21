@@ -279,12 +279,12 @@ runMacs = function(nInd,nChr=1, segSites=NULL, inbred=FALSE, species="GENERIC",
   hotspotPath <- if (is.null(manualCommand)) {
     NULL
   } else {
-    .runMacTS_hotspot_path(manualCommand)
+    .runMacsTS_hotspot_path(manualCommand)
   }
   recMap <- if (is.null(hotspotPath)) {
     NULL
   } else {
-    .runMacTS_map_from_hotspots(
+    .runMacsTS_map_from_hotspots(
       path = hotspotPath,
       nChr = nChr,
       seqLen = 1,

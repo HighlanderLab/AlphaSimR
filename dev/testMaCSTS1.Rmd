@@ -12,13 +12,13 @@ knitr::opts_chunk$set(echo = TRUE)
 
 - `MaCSTS()` now returns ts tables per chromosome: records ancestry from MaCS local trees (nodes/edges/intervals), and with `useMacsMut = TRUE` it also records MaCS-generated sites/mutations during simulation.
 - TS ancestry/mutation work is split into staged helpers: `simAnc()`, `simMut()`, and `finalizeInbredTs()` (optional, when `inbred=TRUE`).
-- `MaCSTS()`is designed to be a part of the high-level `runMacTS()` wrapper, which will handle:
+- `MaCSTS()`is designed to be a part of the high-level `runMacsTS()` wrapper, which will handle:
 
    - 1.TS generation (simAnc, and optionally simMut depending on mode);
    - 2.TS-to-founder conversion (logic in `R/makeFoundersFromTs.R`: site sampling/filtering, genMap construction);
    - 3.return a MapPop object like runMacs.
    
-- Current TS chromosome count uses `nChr` (not `maxSites`, `maxSites` will only be in high level wrapper runMacTS).
+- Current TS chromosome count uses `nChr` (not `maxSites`, `maxSites` will only be in high level wrapper runMacsTS).
 - Per-chromosome simulation runs in parallel when OpenMP is available (`nThreads`).
 
 ## Goal Of This Notebook
