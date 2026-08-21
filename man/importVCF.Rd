@@ -108,6 +108,16 @@ founderPop = importVCF("founders.vcf.gz",
                        breaks=list(c(0, 1e8)),
                        rates=list(c(1e-8)),
                        segSites=1000)
+
+# Initialize founder tree-sequence tables for forward recording.
+founderPopTs = importVCF("founders.vcf.gz",
+                        breaks=list(c(0, 1e8)),
+                        rates=list(c(1e-8)),
+                        segSites=1000,
+                        tsRecord=TRUE,
+                        addTsMut=FALSE)
+SP = SimParam$new(founderPopTs)
+SP$setTrackTs(TRUE, founderPop=founderPopTs)
 }
 
 }

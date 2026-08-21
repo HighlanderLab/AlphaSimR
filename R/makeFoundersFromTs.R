@@ -561,21 +561,53 @@ ts2chrData <- function(ts_path = NULL, breaks, rates, segSites, site_sampling_se
 
 #' Build a MapPop from Tree Sequence Data
 #'
+#' @description
+#' Converts one or more tree sequences to an AlphaSimR
+#' \code{\link{MapPop-class}} by extracting biallelic segregating variants and
+#' mapping tree-sequence coordinates through a recombination map. The resulting
+#' population keeps the metadata needed for forward tree-sequence recording.
+#'
 #' @param chr_info Input tree-sequence data. Supports either:
-#'   1) explicit per-chromosome list entries with `ts_path`/`ts`/`tc_xptr`
-#'   plus `breaks` and `rates`; or
-#'   2) bundle style list containing `tables` or `ts` plus map metadata.
-#' @param ploidy Integer ploidy used to construct the resulting `MapPop`.
+#'   1) explicit per-chromosome list entries with \code{ts_path},
+#'   \code{ts}, or \code{tc_xptr} plus \code{breaks} and \code{rates}; or
+#'   2) bundle style list containing \code{tables} or \code{ts} plus map
+#'   metadata.
+#' @param ploidy Integer ploidy used to construct the resulting
+#' \code{\link{MapPop-class}}.
 #' @param inbred Logical; whether resulting individuals are inbred.
 #' @param segSites Optional site-count override (scalar or per chromosome).
 #' @param site_sampling_seed Integer seed used when downsampling segregating sites.
 #' @param nThreads Optional chromosome-level worker count.
-#' @param returnMeta Logical; if `TRUE`, return list with `pop`, `keptPosBp`,
-#'   and `chrData`; otherwise return `MapPop` only.
+#' @param returnMeta Logical; if \code{TRUE}, return list with \code{pop},
+#' \code{keptPosBp}, and \code{chrData}; otherwise return
+#' \code{\link{MapPop-class}} only.
 #'
-#' @return A `MapPop` object, or metadata list if `returnMeta = TRUE`.
-#' @keywords internal
-#' @noRd
+#' @details
+#' Each chromosome must provide tree-sequence input and a recombination map.
+#' The map is supplied as \code{breaks} and \code{rates}, where
+#' \code{breaks} are tree-sequence coordinate breakpoints and \code{rates} are
+#' recombination rates for the corresponding intervals. The physical or
+#' tree-sequence coordinates of retained variants are stored on the returned
+#' population as \code{tsForwardPosMeta}.
+#'
+#' If \code{segSites} is supplied, biallelic segregating variants are sampled
+#' with reservoir sampling using \code{site_sampling_seed}. Non-biallelic and
+#' non-segregating variants are ignored.
+#'
+#' @return A \code{\link{MapPop-class}} object, or metadata list if
+#' \code{returnMeta = TRUE}.
+#'
+#' @examples
+#' \dontrun{
+#' chr_info = list(list(
+#'   ts_path="dev/testData/msprime_chr0.trees",
+#'   breaks=c(0, 1),
+#'   rates=c(1)
+#' ))
+#' founderPop = asMapPop(chr_info=chr_info, ploidy=2L)
+#' }
+#'
+#' @export
 asMapPop <- function(chr_info, ploidy = 2L, inbred = FALSE, segSites = NULL,
                      site_sampling_seed = 42L, nThreads = NULL,
                      returnMeta = FALSE) {

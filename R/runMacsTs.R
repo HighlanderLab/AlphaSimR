@@ -27,20 +27,38 @@
   seqLen * thetaScaled
 }
 
-#' Simulate Ancestry as TS Tables without Post-Ancestry Mutations
+#' Simulate MaCS Ancestry as Tree-Sequence Tables
 #'
-#' @param args Character MaCS command prefix with trailing `-s`.
+#' @description
+#' Runs the MaCS ancestry simulation path and returns one tskit table collection
+#' per chromosome, without adding post-ancestry mutations. This is the staged
+#' ancestry step used by \code{\link{runMacsTS}}.
+#'
+#' @param args Character MaCS command prefix with trailing \code{-s}.
 #' @param nChr Integer number of chromosomes.
 #' @param inbred Logical.
 #' @param ploidy Integer ploidy.
 #' @param nThreads Integer thread count.
 #' @param seed Integer vector of chromosome seeds.
-#' @param usePhysicalPositions Logical; use bp positions in TS if `TRUE`.
-#' @param Nref Optional numeric reference `Ne` for time scaling.
+#' @param usePhysicalPositions Logical; use bp positions in TS if \code{TRUE}.
+#' @param Nref Optional numeric reference \code{Ne} for time scaling.
+#'
+#' @details
+#' This function is useful when ancestry simulation and mutation placement need
+#' to be controlled separately. For the standard founder-population workflow,
+#' use \code{\link{runMacsTS}}.
 #'
 #' @return List with ancestry table collections and metadata.
-#' @keywords internal
-#' @noRd
+#'
+#' @examples
+#' \dontrun{
+#' cmd = runMacs2(nInd=10, nChr=1, segSites=NULL, returnCommand=TRUE)
+#' anc = simAnc(args=paste0(20, " ", cmd, " -s "),
+#'              nChr=1, inbred=FALSE, ploidy=2L,
+#'              nThreads=1L, seed=123L)
+#' }
+#'
+#' @export
 simAnc <- function(args, nChr, inbred, ploidy, nThreads, seed,
                    usePhysicalPositions = FALSE, Nref = NA_real_) {
   nChr <- as.integer(nChr)
@@ -67,15 +85,36 @@ simAnc <- function(args, nChr, inbred, ploidy, nThreads, seed,
   anc
 }
 
-#' Add Mutations to Ancestry TS Tables
+#' Add Mutations to Ancestry Tree-Sequence Tables
 #'
-#' @param x List returned by `simAnc`, or a list of table-collection pointers.
+#' @description
+#' Adds MaCS-style mutations to table collections returned by
+#' \code{\link{simAnc}}. This is the staged mutation step used by
+#' \code{\link{runMacsTS}} when \code{mutationMode = "postTs"}.
+#'
+#' @param x List returned by \code{\link{simAnc}}, or a list of
+#' table-collection pointers.
 #' @param dTheta Optional scalar/vector mutation-rate parameter in MaCS units.
 #' @param seed Optional scalar/vector integer seeds for mutation sampling.
 #'
+#' @details
+#' If \code{dTheta} is omitted and \code{x} is the full list returned by
+#' \code{\link{simAnc}}, the mutation-rate metadata stored by \code{simAnc()} is
+#' used. If \code{seed} is omitted, mutation seeds are derived from the ancestry
+#' seeds when available.
+#'
 #' @return List with mutated table collections and metadata.
-#' @keywords internal
-#' @noRd
+#'
+#' @examples
+#' \dontrun{
+#' cmd = runMacs2(nInd=10, nChr=1, segSites=NULL, returnCommand=TRUE)
+#' anc = simAnc(args=paste0(20, " ", cmd, " -s "),
+#'              nChr=1, inbred=FALSE, ploidy=2L,
+#'              nThreads=1L, seed=123L)
+#' mut = simMut(anc, seed=456L)
+#' }
+#'
+#' @export
 simMut <- function(x, dTheta = NULL, seed = NULL) {
   tables <- if (is.list(x) && !is.null(x$tables)) x$tables else x
   if (!is.list(tables) || length(tables) == 0L) {
@@ -329,31 +368,62 @@ finalizeInbredTs <- function(x, inbred = FALSE, ploidy = 2L) {
   list(breaks = recBreaks, rates = recRates)
 }
 
-#' High-level TS wrapper parallel to runMacs
+#' Create Founder Haplotypes and Tree Sequences using MaCS
+#'
+#' @description
+#' Tree-sequence analogue of \code{\link{runMacs}}. This function simulates
+#' MaCS ancestry, optionally adds mutations, converts the resulting tree
+#' sequence data to a \code{\link{MapPop-class}}, and can return the founder
+#' table collections for forward tree-sequence recording.
 #'
 #' @param nInd Integer number of individuals to simulate.
 #' @param nChr Integer number of chromosomes.
 #' @param segSites Optional site-count cap per chromosome (scalar or vector).
 #' @param inbred Logical.
-#' @param species Species preset used by `runMacs`.
+#' @param species Species preset used by \code{\link{runMacs}}.
 #' @param split Optional population split time in generations.
 #' @param ploidy Integer ploidy.
 #' @param manualCommand Optional MaCS command tail (advanced users).
 #' @param manualGenLen Optional genetic length(s) in Morgan.
 #' @param nThreads Optional thread count.
-#' @param mutationMode One of `"postTs"`, `"macs"`, `"none"`.
-#' @param usePhysicalPositions Logical; TS coordinates in bp if `TRUE`.
-#' @param Nref Optional reference `Ne` for time scaling.
-#' @param seed Optional integer vector (length 1 or `nChr`) for ancestry.
-#' @param mutSeed Optional integer vector (length 1 or `nChr`) for post-TS mutation.
+#' @param mutationMode One of \code{"postTs"}, \code{"macs"}, or
+#' \code{"none"}.
+#' @param usePhysicalPositions Logical; TS coordinates in bp if \code{TRUE}.
+#' @param Nref Optional reference \code{Ne} for time scaling.
+#' @param seed Optional integer vector (length 1 or \code{nChr}) for ancestry.
+#' @param mutSeed Optional integer vector (length 1 or \code{nChr}) for
+#' post-TS mutation.
 #' @param mutSeedOffset Integer offset used when deriving post-TS mutation seeds.
-#' @param siteSamplingSeed Integer seed for `asMapPop` site sampling.
+#' @param siteSamplingSeed Integer seed for \code{\link{asMapPop}} site
+#' sampling.
 #' @param expandInbredTs Logical; whether to expand inbred TS sample leaves before conversion.
-#' @param returnTs Logical; return TS tables and metadata alongside `MapPop`.
+#' @param returnTs Logical; return TS tables and metadata alongside
+#' \code{\link{MapPop-class}}.
 #'
-#' @return `MapPop` by default; otherwise a list with `pop`, `tables`, and metadata.
-#' @keywords internal
-#' @noRd
+#' @details
+#' \code{mutationMode = "postTs"} first creates ancestry tables and then calls
+#' \code{\link{simMut}} to place mutations. \code{mutationMode = "macs"} keeps
+#' the mutation placement from the native MaCS path. \code{mutationMode = "none"}
+#' returns ancestry-only tables and requires \code{returnTs = TRUE}.
+#'
+#' When \code{returnTs = TRUE}, the returned population keeps
+#' \code{tsForwardSource} and \code{tsForwardPosMeta} attributes that can be used
+#' by \code{SimParam$setTrackTs(TRUE, founderPop=...)}.
+#'
+#' @return \code{\link{MapPop-class}} by default; otherwise a list with
+#' \code{pop}, \code{tables}, and metadata.
+#'
+#' @examples
+#' \dontrun{
+#' founderPop = runMacsTS(nInd=10, nChr=1, segSites=100)
+#'
+#' out = runMacsTS(nInd=10, nChr=1, segSites=100, returnTs=TRUE)
+#' SP = SimParam$new(out$pop)
+#' SP$setTrackTs(TRUE, founderPop=out$pop)
+#' paths = tsForwardFinalizeFromSimParam(SP, out_dir=tempdir())
+#' }
+#'
+#' @export
 runMacsTS <- function(nInd, nChr = 1, segSites = NULL, inbred = FALSE,
                      species = "GENERIC", split = NULL, ploidy = 2L,
                      manualCommand = NULL, manualGenLen = NULL, nThreads = NULL,

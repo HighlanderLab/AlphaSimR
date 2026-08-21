@@ -1304,9 +1304,26 @@ tsForwardWriteTreeSequences <- function(ts_list,
   invisible(simParam)
 }
 
-#' Check whether a forward recorder is attached to SimParam
-#' @keywords internal
-#' @noRd
+#' Check Whether a Forward Tree-Sequence Recorder Is Attached
+#'
+#' @description
+#' Returns whether a \code{\link{SimParam}} object currently has an attached
+#' forward tree-sequence recorder.
+#'
+#' @param simParam \code{\link{SimParam}} object.
+#'
+#' @return Logical scalar.
+#'
+#' @examples
+#' \dontrun{
+#' founderPop = runMacsTS(nInd=10, nChr=1, segSites=100)
+#' SP = SimParam$new(founderPop)
+#' tsForwardHasRecorder(SP)
+#' SP$setTrackTs(TRUE, founderPop=founderPop)
+#' tsForwardHasRecorder(SP)
+#' }
+#'
+#' @export
 tsForwardHasRecorder <- function(simParam) {
   !is.null(.tsForwardGetRecorder(simParam))
 }
@@ -1364,22 +1381,45 @@ tsForwardInitOnSimParam <- function(simParam, founderPop) {
   out_paths
 }
 
-#' Finalize recorder attached to SimParam and write trees
-#' @param simParam SimParam object
-#' @param out_dir output directory
-#' @param out_basename output basename
-#' @param simplify logical; if TRUE, call table-collection simplify before dump
-#' @param keep_unary logical; passed to `tc$simplify(keep_unary=...)` when `simplify=TRUE`.
-#' @param update_sample_flags logical; passed to `tc$simplify(update_sample_flags=...)`
-#'   when `simplify=TRUE`. Default is FALSE.
-#' @param samples optional sample set (used only when simplifying and/or when
-#'   `keep_existing_samples = FALSE`)
-#' @param keep_existing_samples logical; if TRUE (default), keep founder/original sample
-#'   flags when sample updates are requested
-#' @param clear clear recorder on simParam after writing
-#' @return character vector of output tree file paths
-#' @keywords internal
-#' @noRd
+#' Finalize Forward Tree-Sequence Recording from SimParam
+#'
+#' @description
+#' Finalizes the forward tree-sequence recorder attached to a
+#' \code{\link{SimParam}} object and writes one \code{.trees} file per
+#' chromosome.
+#'
+#' @param simParam \code{\link{SimParam}} object with an attached recorder,
+#' usually initialized with \code{simParam$setTrackTs(TRUE, founderPop=...)}.
+#' @param out_dir output directory. If \code{NULL}, output paths are resolved
+#' from the founder tree-sequence source when possible.
+#' @param out_basename output basename.
+#' @param simplify logical; if \code{TRUE}, call table-collection simplify
+#' before writing.
+#' @param keep_unary logical; passed to \code{tc$simplify(keep_unary=...)} when
+#' \code{simplify=TRUE}.
+#' @param update_sample_flags logical; passed to
+#' \code{tc$simplify(update_sample_flags=...)} when \code{simplify=TRUE}.
+#' Default is \code{FALSE}.
+#' @param samples optional sample set used when simplifying or when
+#' \code{keep_existing_samples = FALSE}.
+#' @param keep_existing_samples logical; if \code{TRUE}, keep founder/original
+#' sample flags when sample updates are requested.
+#' @param clear logical; if \code{TRUE}, clear the recorder from
+#' \code{simParam} after writing.
+#'
+#' @return Character vector of output tree file paths.
+#'
+#' @examples
+#' \dontrun{
+#' founderPop = runMacsTS(nInd=10, nChr=1, segSites=100)
+#' SP = SimParam$new(founderPop)
+#' SP$setTrackTs(TRUE, founderPop=founderPop)
+#' paths = tsForwardFinalizeFromSimParam(SP, out_dir=tempdir(),
+#'                                       out_basename="AlphaSimR_forward",
+#'                                       clear=TRUE)
+#' }
+#'
+#' @export
 tsForwardFinalizeFromSimParam <- function(simParam,
                                           out_dir = NULL,
                                           out_basename = "AlphaSimR_forward",
@@ -1404,23 +1444,43 @@ tsForwardFinalizeFromSimParam <- function(simParam,
   )
 }
 
-#' Write recorder attached to SimParam with custom samples and optional simplify
-#' @param simParam SimParam object
-#' @param out_dir output directory
-#' @param out_basename output basename
-#' @param simplify logical; if TRUE, call table-collection simplify before dump
-#' @param keep_unary logical; passed to `tc$simplify(keep_unary=...)` when `simplify=TRUE`.
-#'   Default is TRUE.
-#' @param update_sample_flags logical; passed to `tc$simplify(update_sample_flags=...)`
-#'   when `simplify=TRUE`. Default is FALSE.
-#' @param samples NULL (default: last generation nodes), integer vector (all chromosomes),
-#'   or list of integer vectors by chromosome
-#' @param keep_existing_samples logical; if TRUE (default), keep founder/original sample
-#'   flags and add requested samples on top.
-#' @param clear clear recorder on simParam after writing
-#' @return character vector of output tree file paths
-#' @keywords internal
-#' @noRd
+#' Write Forward Tree Sequences from SimParam with Explicit Samples
+#'
+#' @description
+#' Writes the recorder attached to a \code{\link{SimParam}} object with optional
+#' sample updates and simplification. This is a lower-level variant of
+#' \code{\link{tsForwardFinalizeFromSimParam}} for workflows that need direct
+#' control over sampled nodes.
+#'
+#' @param simParam \code{\link{SimParam}} object with an attached recorder.
+#' @param out_dir output directory.
+#' @param out_basename output basename.
+#' @param simplify logical; if \code{TRUE}, call table-collection simplify
+#' before writing.
+#' @param keep_unary logical; passed to \code{tc$simplify(keep_unary=...)} when
+#' \code{simplify=TRUE}. Default is \code{TRUE}.
+#' @param update_sample_flags logical; passed to
+#' \code{tc$simplify(update_sample_flags=...)} when \code{simplify=TRUE}.
+#' Default is \code{FALSE}.
+#' @param samples \code{NULL} for default last-generation samples, an integer
+#' vector used for all chromosomes, or a list of integer vectors by chromosome.
+#' @param keep_existing_samples logical; if \code{TRUE}, keep founder/original
+#' sample flags and add requested samples on top.
+#' @param clear logical; if \code{TRUE}, clear the recorder from
+#' \code{simParam} after writing.
+#'
+#' @return Character vector of output tree file paths.
+#'
+#' @examples
+#' \dontrun{
+#' founderPop = runMacsTS(nInd=10, nChr=1, segSites=100)
+#' SP = SimParam$new(founderPop)
+#' SP$setTrackTs(TRUE, founderPop=founderPop)
+#' paths = tsForwardWriteTreesFromSimParam(SP, out_dir=tempdir(),
+#'                                         simplify=TRUE)
+#' }
+#'
+#' @export
 tsForwardWriteTreesFromSimParam <- function(simParam,
                                             out_dir = NULL,
                                             out_basename = "AlphaSimR_forward",
