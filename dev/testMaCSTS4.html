@@ -363,16 +363,16 @@ effects, based on <code>testMaCSTS1.Rmd</code>,
 <code>testMaCSTS2.Rmd</code>, and <code>testMaCSTS3.Rmd</code>.</p>
 <p>It starts from the two supported ways to run:</p>
 <ol style="list-style-type: decimal">
-<li>high-level wrapper: <code>runMacTS(...)</code></li>
+<li>high-level wrapper: <code>runMacsTS(...)</code></li>
 <li>staged low-level path (for developers and advanced users):
 <code>simAnc(...) -&gt; simMut(...) -&gt; finalizeInbredTs(...) -&gt; asMapPop(...)</code></li>
 </ol>
 </div>
 <div id="two-ways-to-run" class="section level2">
 <h2>1) Two Ways To Run</h2>
-<div id="a.-high-level-wrapper-runmacts" class="section level3">
-<h3>A. High-level wrapper (<code>runMacTS</code>)</h3>
-<p><code>runMacTS</code> is the default user-facing entry point. It is
+<div id="a.-high-level-wrapper-runmacsts" class="section level3">
+<h3>A. High-level wrapper (<code>runMacsTS</code>)</h3>
+<p><code>runMacsTS</code> is the default user-facing entry point. It is
 designed to feel like <code>runMacs/runMacs2</code> but with TS-aware
 internals and mode control.</p>
 <ul>
@@ -404,7 +404,7 @@ stage.</p>
 <div id="function-relationship" class="section level2">
 <h2>2) Function Relationship</h2>
 <pre class="r"><code>cat(&quot;
-runMacTS()
+runMacsTS()
   ├─ command builder (species/manual)
   ├─ mutationMode = &#39;macs&#39;  -&gt; MaCSTS(..., useMacsMut=TRUE, expandInbredSamples=FALSE)
   ├─ mutationMode = &#39;postTs&#39;-&gt; simAnc(...) -&gt; simMut(...)
@@ -418,7 +418,7 @@ Lower layers:
   finalizeInbredTs() -&gt; tsFinalizeInbredTableCollection(...) per chromosome
   MaCSTS()  -&gt; C++ simulator + TS recorder
 &quot;)</code></pre>
-<p>runMacTS() ├─ command builder (species/manual) ├─ mutationMode =
+<p>runMacsTS() ├─ command builder (species/manual) ├─ mutationMode =
 ‘macs’ -&gt; MaCSTS(…, useMacsMut=TRUE, expandInbredSamples=FALSE) ├─
 mutationMode = ‘postTs’-&gt; simAnc(…) -&gt; simMut(…) ├─ mutationMode =
 ‘none’ -&gt; simAnc(…) only (TS-only unless user mutates later) ├─
@@ -444,13 +444,13 @@ simulator + TS recorder</p>
     &quot;nThreads&quot;
   ),
   where_used = c(
-    &quot;runMacTS&quot;,
+    &quot;runMacsTS&quot;,
     &quot;MaCSTS&quot;,
     &quot;MaCSTS/asMapPop&quot;,
     &quot;MaCSTS (timeScale)&quot;,
     &quot;asMapPop&quot;,
     &quot;MaCSTS/asMapPop/finalizeInbredTs&quot;,
-    &quot;runMacTS/finalizeInbredTs&quot;,
+    &quot;runMacsTS/finalizeInbredTs&quot;,
     &quot;simAnc/MaCSTS ancestry RNG&quot;,
     &quot;simMut post-TS RNG&quot;,
     &quot;MaCS chromosomes + asMapPop worker&quot;
@@ -486,7 +486,7 @@ knitr::kable(param_effects)</code></pre>
 <tbody>
 <tr class="odd">
 <td align="left">mutationMode</td>
-<td align="left">runMacTS</td>
+<td align="left">runMacsTS</td>
 <td align="left">Selects mutation path: macs vs postTs vs none</td>
 </tr>
 <tr class="even">
@@ -519,7 +519,7 @@ structure</td>
 </tr>
 <tr class="odd">
 <td align="left">expandInbredTs</td>
-<td align="left">runMacTS/finalizeInbredTs</td>
+<td align="left">runMacsTS/finalizeInbredTs</td>
 <td align="left">If TRUE with inbred/ploidy&gt;1, duplicates TS sample
 leaves</td>
 </tr>
@@ -613,7 +613,7 @@ print_wrapper_vs_staged &lt;- function(cmp) {
 <pre class="r"><code>library(AlphaSimR)
 devtools::load_all()
 set.seed(1)
-out &lt;- AlphaSimR:::runMacTS(
+out &lt;- AlphaSimR:::runMacsTS(
   nInd = 4,
   nChr = 2,
   segSites = 60,
@@ -626,7 +626,7 @@ out &lt;- AlphaSimR:::runMacTS(
   returnTs = TRUE
 )
 
-# runMacTS returns:
+# runMacsTS returns:
 # out$pop      -&gt; MapPop
 # out$tables   -&gt; TS table collections (if returnTs=TRUE)</code></pre>
 </div>
@@ -672,7 +672,7 @@ pop &lt;- AlphaSimR:::asMapPop(
 <div id="wrapper-vs-staged-equivalence" class="section level3">
 <h3>Wrapper vs staged equivalence</h3>
 <pre class="r"><code># Reuse objects from the previous ection:
-# - out  : runMacTS(...) result
+# - out  : runMacsTS(...) result
 # - mut  : simMut(...) result from staged path
 # - pop  : asMapPop(...) result from staged path
 
@@ -700,7 +700,7 @@ print_wrapper_vs_staged(cmp)</code></pre>
 <h3>Wrapper vs staged (inbred=TRUE, ploidy&gt;1)</h3>
 <pre class="r"><code># Example: inbred TRUE with ploidy 2
 set.seed(1)
-out_inbred &lt;- AlphaSimR:::runMacTS(
+out_inbred &lt;- AlphaSimR:::runMacsTS(
   nInd = 4,
   nChr = 2,
   segSites = 60,
@@ -711,7 +711,8 @@ out_inbred &lt;- AlphaSimR:::runMacTS(
   usePhysicalPositions = TRUE,
   expandInbredTs = TRUE,
   nThreads = 1L,
-  returnTs = TRUE
+  returnTs = TRUE,
+  Nref = 10000
 )
 
 anc_inbred &lt;- AlphaSimR:::simAnc(
@@ -722,7 +723,8 @@ anc_inbred &lt;- AlphaSimR:::simAnc(
   nThreads = 1L,
   seed = out_inbred$seed,
   usePhysicalPositions = TRUE,
-  Nref = NA_real_
+  #Nref = NA_real_,
+  Nref = 10000
 )
 mut_inbred &lt;- AlphaSimR:::simMut(anc_inbred)
 fin_inbred &lt;- AlphaSimR:::finalizeInbredTs(mut_inbred, inbred = TRUE, ploidy = 2L)
@@ -751,13 +753,13 @@ print_wrapper_vs_staged(cmp_inbred)</code></pre>
 <pre><code>##   chr  method num_nodes num_edges num_sites num_mutations
 ## 1   1 wrapper      2620      5710      9372          9372
 ## 2   2 wrapper      3497      7788     12514         12514
-## 3   1  staged      2620      5710      9372          9372
-## 4   2  staged      3497      7788     12514         12514
+## 3   1  staged      2620      5710   4225625       4225625
+## 4   2  staged      3497      7788   5750839       5750839
 ##            metric equal
 ## 1           nLoci  TRUE
-## 2    geno_all_chr  TRUE
+## 2    geno_all_chr FALSE
 ## 3  genMap_all_chr FALSE
-## 4 ts_table_counts  TRUE</code></pre>
+## 4 ts_table_counts FALSE</code></pre>
 <p>Output a ts as an example and check it in Python:</p>
 <pre class="r"><code>tables_src &lt;- if (exists(&quot;fin_inbred&quot;)) {
   fin_inbred$tables
@@ -789,6 +791,15 @@ ts_inbred.samples()</code></pre>
 ##     0         1         2         3    
 ##   ┏━┻━━┓    ┏━┻━━┓    ┏━┻━━┓    ┏━┻━━┓ 
 ## 2612 2613 2614 2615 2616 2617 2618 2619</code></pre>
+<pre class="python"><code>from IPython.display import display
+svg_size = (800, 250)
+svg_string = ts_inbred.first().draw_svg(
+    size=svg_size, time_scale=&quot;rank&quot;, omit_sites=True,
+    y_axis=True, y_label=&quot; &quot;  # optional: show a time scale on the left
+)
+with open(&quot;tmp_tree.svg&quot;, &quot;w&quot;) as f:
+    f.write(svg_string)</code></pre>
+<pre><code>## 5752</code></pre>
 <pre class="python"><code>print(ts_inbred.tables.nodes[2612:2620])</code></pre>
 <pre><code>## ╔══╤═════╤══════════╤══════════╤════╤════════╗
 ## ║id│flags│population│individual│time│metadata║
@@ -802,6 +813,15 @@ ts_inbred.samples()</code></pre>
 ## ║6 │    1│         0│         3│   0│        ║
 ## ║7 │    1│         0│         3│   0│        ║
 ## ╚══╧═════╧══════════╧══════════╧════╧════════╝</code></pre>
+<pre class="python"><code>print(ts_inbred.tables.nodes[0:4])</code></pre>
+<pre><code>## ╔══╤═════╤══════════╤══════════╤══════════╤════════╗
+## ║id│flags│population│individual│time      │metadata║
+## ╠══╪═════╪══════════╪══════════╪══════════╪════════╣
+## ║0 │    0│         0│        -1│0.00000000│        ║
+## ║1 │    0│         0│        -1│0.00000000│        ║
+## ║2 │    0│         0│        -1│0.00000000│        ║
+## ║3 │    0│         0│        -1│0.00000000│        ║
+## ╚══╧═════╧══════════╧══════════╧══════════╧════════╝</code></pre>
 <pre class="python"><code>g_matrix = ts_inbred.genotype_matrix()
 for hap in range(0, len(g_matrix[0]), 2):
     print(hap, hap+1)
@@ -820,7 +840,7 @@ alleles.</p>
 </div>
 <div id="parameter-sensitivity-checks" class="section level3">
 <h3>Parameter sensitivity checks</h3>
-<p>In tests/testthat/test-runMacTS-sensitivity.R</p>
+<p>In tests/testthat/test-runMacsTS-sensitivity.R</p>
 </div>
 </div>
 
