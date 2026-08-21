@@ -1,0 +1,157 @@
+---
+title: "test MaCSTS 3"
+output: html_document
+date: "2026-06-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## General Notes
+
+This notebook follows `testMaCSTS2.Rmd` outputs and then:
+
+1. runs `msprime_from_macs_scenarios.py` to generate msprime `.trees` and manifest;
+2. runs `msprime_macs_scenarios_compare.py` to build a combined long table;
+3. compares distributions across methods (`macs`, `macsTS`, `msprime`).
+
+These tests are important because `MaCSTS` and the msprime bridge both rely on
+multiple unit conversions (tests on more scenarios are welcome!):
+
+- sequence length;
+- time unit conversion (coalescent-scaled time vs generations);
+- mutation and recombination rate conversions;
+- migration parameter conversions (global vs pairwise);
+- sample-count mapping when ploidy changes.
+
+The goal here is not exact replicate-by-replicate identity with msprime, but to
+check that scenario-level distributions (mutations, trees, edges, nodes, and
+root times) are consistent after these conversions.
+
+Current order in MaCSTS when `useMacsMut = FALSE`:
+
+1. During `buildTs()`, local trees are generated along the chromosome and each
+   interval is recorded to TS edge/node tables (`recordTreeInterval`).
+2. No MaCS mutation placement happens in this step (`addMutationsTs` is skipped).
+3. At the end of `buildTs()`, ancestry is simplified (`TsRecorder::simplify`).
+4. On `release()`, times are rescaled (if `Nref` was provided), then tables are
+   sorted and indexed.
+5. Post-TS mutation (if requested) is applied later by `simMut()` /
+   `tsMutateTableCollection()` on the already simplified/rescaled ancestry.
+6. Inbred leaf expansion is optional and can be deferred to
+   `finalizeInbredTs()` (this is what `simAnc(..., expandInbredSamples = FALSE)`
+   does in the staged workflow).
+
+```{r paths}
+find_dev_dir <- function() {
+  if (file.exists("msprime_from_macs_scenarios.py")) return(normalizePath(".", winslash = "/"))
+  if (file.exists("dev/msprime_from_macs_scenarios.py")) return(normalizePath("dev", winslash = "/"))
+  stop("Cannot find dev directory containing msprime_from_macs_scenarios.py")
+}
+
+dev_dir <- find_dev_dir()
+py_sim_script <- file.path(dev_dir, "msprime_from_macs_scenarios.py")
+py_cmp_script <- file.path(dev_dir, "msprime_macs_scenarios_compare.py")
+
+macsts_manifest <- file.path(dev_dir, "testData/out_phase1_useMacsMut_FALSE/phase1_macsTS_useMacsMut_FALSE_manifest.csv")
+msprime_manifest <- file.path(dev_dir, "testData/out_msprime_from_macs/msprime_manifest.csv")
+comparison_long_csv <- file.path(dev_dir, "testData/method_comparison_long.csv")
+
+stopifnot(file.exists(py_sim_script))
+stopifnot(file.exists(py_cmp_script))
+stopifnot(file.exists(macsts_manifest))
+```
+
+## Run Python Scripts
+
+```{r run-python}
+run_python_script <- function(dev_dir, script_name, args = character()) {
+  # Use your own path here!
+  py <- '/usr/bin/python3'
+
+  old <- getwd()
+  on.exit(setwd(old), add = TRUE)
+  setwd(dev_dir)
+  status <- system2(py, args = c(script_name, args))
+  if (!identical(status, 0L)) stop("Failed to run ", script_name, " (exit status ", status, ")")
+}
+
+# 1) Generate msprime replicates + manifest.
+# Conversion details implemented in msprime_from_macs_scenarios.py:
+# - seq length: token 2nd in MaCS args is passed to msprime sequence_length.
+# - time: MaCS scaled times are converted to generations by t_gen = t * 4 * Nref.
+# - recombination: rec_rate_bp = r / (4 * Nref).
+# - mutation: mut_rate_bp = theta / (4 * Nref), then applied via sim_mutations().
+# - migration:
+#     global M  -> pairwise m_ij = M / ((k-1) * 4 * Nref) for k populations;
+#     pair Mij  -> m_ij = Mij / (4 * Nref).
+# - samples/ploidy:
+#     script currently runs msprime with ploidy=2, so MaCS haploid sample counts
+#     per population are halved (must be even) before passing to `samples=`.
+run_python_script(
+  dev_dir = dev_dir,
+  script_name = basename(py_sim_script),
+  args = c(
+    "--nrep", "50",
+    "--nchr", "1",
+    "--nref", "10000",
+    "--base-seed", "700000",
+    "--model", "smc_prime",
+    "--out-dir", "testData/out_msprime_from_macs"
+  )
+)
+
+# 2) Build cross-method comparison summary + long table.
+# msprime_macs_scenarios_compare.py reads:
+# - MaCSTS manifest (from testMaCSTS2),
+# - msprime manifest (from step 1),
+# and writes a long-format table used below for distribution plots.
+run_python_script(
+  dev_dir = dev_dir,
+  script_name = basename(py_cmp_script)
+)
+```
+
+## Distribution Comparison Plots
+
+```{r read-table}
+stopifnot(file.exists(comparison_long_csv))
+cmp <- read.csv(comparison_long_csv, stringsAsFactors = FALSE)
+
+
+num_cols <- c("num_mut", "num_trees", "num_edges", "num_nodes", "max_root_time")
+for (nm in num_cols) {
+  cmp[[nm]] <- suppressWarnings(as.numeric(cmp[[nm]]))
+}
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+metrics <- c("num_mut", "num_trees", "num_edges", "num_nodes", "max_root_time")
+
+long_df <- cmp %>%
+  pivot_longer(cols = all_of(metrics), names_to = "metric", values_to = "value") %>%
+  filter(!is.na(value))
+
+# Mean + SD bars by scenario/method for each metric
+summary_df <- long_df %>%
+  group_by(Scenarios, Methods, metric) %>%
+  summarise(mean = mean(value), sd = sd(value), .groups = "drop")
+
+ggplot(summary_df, aes(x = Scenarios, y = mean, fill = Methods)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_errorbar(
+    aes(ymin = mean - sd, ymax = mean + sd),
+    position = position_dodge(width = 0.8),
+    width = 0.2
+  ) +
+  facet_wrap(~ metric, scales = "free_y") +
+  labs(x = "Scenario", y = "Mean +/- SD", fill = "Method") +
+  theme_bw()+
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8)
+  )
+
+```

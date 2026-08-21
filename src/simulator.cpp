@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <tuple>
 #include <math.h>
+#include <cmath>
 #include <algorithm> 
 #include <cctype>
 #include <locale>
@@ -13,6 +14,7 @@
 #include <boost/algorithm/string/split.hpp> // Include for boost::split
 #include <boost/algorithm/string/classification.hpp> // Include boost::for is_any_of
 #include "simulator.h"
+#include <RcppTskit.hpp>
 #include <boost/algorithm/string/split.hpp> // Include for boost::split
 #include "misc.h"
 
@@ -628,6 +630,34 @@ vector<AlphaSimRReturn> Simulator::beginSimulationMemory() {
   return  toRet;
 }
 
+tsk_table_collection_t * Simulator::beginSimulationTs(bool usePhysicalPositions,
+                                                      bool useMacsMut,
+                                                      double timeScale,
+                                                      bool inbred,
+                                                      unsigned int ploidy,
+                                                      bool expandInbred) {
+  
+  if (pConfig->iIterations != 1) {
+    Rcpp::stop("TS mode currently supports iIterations = 1");
+  }
+  
+  tsk_table_collection_t * toRet = nullptr;
+  try {
+    RandNumGenerator *rg = new RandNumGenerator(pConfig->iRandomSeed);
+    GraphBuilder graphBuilder = GraphBuilder(pConfig, rg);
+    graphBuilder.buildTs(usePhysicalPositions, useMacsMut, inbred, ploidy);
+    toRet = graphBuilder.releaseTableCollectionTs(timeScale, expandInbred);
+    delete rg;
+  } catch (const std::exception & e) {
+    Rcpp::Rcerr << "Simulator caught exception with message:" << endl
+                << e.what() << endl;
+  } catch (const char *message) {
+    Rcpp::Rcerr << "Simulator caught exception with message:" << endl
+                << message << endl;
+  }
+  return toRet;
+}
+
 
 void Simulator::beginSimulation() {
   try {
@@ -687,6 +717,46 @@ vector<AlphaSimRReturn> runFromAlphaSimR(string in) {
   simulator.readInputParameters(arguments);
   vector<AlphaSimRReturn> test = simulator.beginSimulationMemory();
   return test;
+}
+
+tsk_table_collection_t * runFromAlphaSimRTs(string in, bool usePhysicalPositions,
+                                            bool useMacsMut,
+                                            double timeScale,
+                                            bool inbred,
+                                            unsigned int ploidy,
+                                            bool expandInbred) {
+  vector<std::string> words;
+  Simulator simulator;
+  
+  if (in == ""){
+    Rcpp::stop("Not enough args for macs call");
+  }
+  if (in.empty()) {
+    Rcpp::stop("Not enough args for macs call");
+  }
+  boost::split(words, in, boost::is_any_of(", "), boost::token_compress_on);
+  CommandArguments arguments;
+  vector<string> subOption;
+  // sample size
+  subOption.emplace_back(words[0]);
+  // seq length
+  subOption.emplace_back(words[1]);
+  arguments.push_back(subOption);
+  subOption.clear();
+  for (unsigned int i=2;i<words.size();++i){
+    subOption.emplace_back(words[i]);
+    if (i==words.size()-1 || (words[i+1][0]=='-' && words[i+1][1]>=65)){
+      arguments.push_back(subOption);
+      subOption.clear();
+    }
+  }
+  if (arguments.size() == 0) {
+    Rcpp::stop("Not enough args for macs call");
+  }
+  
+  simulator.readInputParameters(arguments);
+  return simulator.beginSimulationTs(usePhysicalPositions, useMacsMut, timeScale,
+                                     inbred, ploidy, expandInbred);
 }
 
 // Runs MaCS once per chromosome and converts the output to AlphaSimR's packed
@@ -839,4 +909,80 @@ Rcpp::List MaCS(Rcpp::String args, arma::uvec maxSites, bool inbred,
   }
   return Rcpp::List::create(Rcpp::Named("geno")=geno,
                             Rcpp::Named("genMap")=genMap);
+}
+
+// Runs MaCS once per chromosome and returns tree-sequence table collections.
+// nChr is the number of chromosomes to simulate.
+// usePhysicalPositions controls coordinate space for TS tables:
+// FALSE (default): unit interval [0, 1], same coordinate system as runMacs internals
+// TRUE: physical bp coordinates [0, dSeqLength]
+// useMacsMut controls whether MaCS-style mutation sampling is performed during
+// ancestry generation (TRUE), or ancestry-only tables are returned (FALSE).
+// Nref optionally sets a reference effective population size for conversion
+// from scaled coalescent units to generations using timeScale = 4 * Nref.
+// [[Rcpp::export]]
+Rcpp::List MaCSTS(Rcpp::String args, int nChr, bool inbred,
+                  arma::uword ploidy, int nThreads, arma::uvec seed,
+                  bool usePhysicalPositions = false,
+                  bool useMacsMut = false,
+                  double Nref = NA_REAL,
+                  bool expandInbredSamples = true){
+  if (args == "") {
+    Rcpp::stop("error passing argument string - it's empty");
+  }
+  if (nChr <= 0) {
+    Rcpp::stop("nChr must be a positive integer");
+  }
+  if (ploidy == 0) {
+    Rcpp::stop("ploidy must be a positive integer");
+  }
+  
+  std::string argsString = args;
+  const arma::uword nChrU = static_cast<arma::uword>(nChr);
+  if (seed.n_elem != nChrU) {
+    Rcpp::stop("seed length must match number of chromosomes");
+  }
+  double timeScale = 1.0;
+  if (std::isfinite(Nref)) {
+    if (!(Nref > 0.0)) {
+      Rcpp::stop("Nref must be positive when provided");
+    }
+    timeScale = 4.0 * Nref;
+  }
+  
+  std::vector<tsk_table_collection_t *> tables(nChrU, nullptr);
+  
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) num_threads(nThreads)
+#endif
+  for (arma::uword chr = 0; chr < nChrU; ++chr) {
+    std::string seedString =
+      std::to_string(static_cast<unsigned long long>(seed[chr]));
+    tables[chr] = runFromAlphaSimRTs(argsString + seedString,
+                                     usePhysicalPositions,
+                                     useMacsMut,
+                                     timeScale,
+                                     inbred,
+                                     static_cast<unsigned int>(ploidy),
+                                     expandInbredSamples);
+  }
+  
+  Rcpp::List tsTables(nChrU);
+  for (arma::uword chr = 0; chr < nChrU; ++chr) {
+    if (tables[chr] == nullptr) {
+      Rcpp::stop("TS simulation failed for chromosome %d",
+                 static_cast<int>(chr + 1));
+    }
+    rtsk_table_collection_t out(tables[chr], true);
+    tsTables[chr] = out;
+  }
+  
+  return Rcpp::List::create(
+    Rcpp::Named("tables") = tsTables,
+    Rcpp::Named("usePhysicalPositions") = usePhysicalPositions,
+    Rcpp::Named("useMacsMut") = useMacsMut,
+    Rcpp::Named("expandInbredSamples") = expandInbredSamples,
+    Rcpp::Named("mutationMode") = useMacsMut ? "macs" : "none",
+    Rcpp::Named("timeScale") = timeScale,
+    Rcpp::Named("Nref") = std::isfinite(Nref) ? Nref : NA_REAL);
 }

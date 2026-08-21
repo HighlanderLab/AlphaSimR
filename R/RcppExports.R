@@ -292,8 +292,8 @@ createIbdMat <- function(ibd, chr, nLoci, ploidy, nThreads) {
     .Call(`_AlphaSimR_createIbdMat`, ibd, chr, nLoci, ploidy, nThreads)
 }
 
-cross <- function(motherGeno, mother, fatherGeno, father, femaleMap, maleMap, trackRec, motherPloidy, fatherPloidy, v, p, motherCentromere, fatherCentromere, quadProb, nThreads) {
-    .Call(`_AlphaSimR_cross`, motherGeno, mother, fatherGeno, father, femaleMap, maleMap, trackRec, motherPloidy, fatherPloidy, v, p, motherCentromere, fatherCentromere, quadProb, nThreads)
+cross <- function(motherGeno, mother, fatherGeno, father, femaleMap, maleMap, trackRec, motherPloidy, fatherPloidy, v, p, motherCentromere, fatherCentromere, quadProb, nThreads, trackRecGen, returnRecHistGen, recordTsDirect, returnTsSegGen, directAppendFnSEXP) {
+    .Call(`_AlphaSimR_cross`, motherGeno, mother, fatherGeno, father, femaleMap, maleMap, trackRec, motherPloidy, fatherPloidy, v, p, motherCentromere, fatherCentromere, quadProb, nThreads, trackRecGen, returnRecHistGen, recordTsDirect, returnTsSegGen, directAppendFnSEXP)
 }
 
 createDH2 <- function(geno, nDH, genMap, v, p, trackRec, nThreads) {
@@ -399,6 +399,10 @@ MaCS <- function(args, maxSites, inbred, ploidy, nThreads, seed) {
     .Call(`_AlphaSimR_MaCS`, args, maxSites, inbred, ploidy, nThreads, seed)
 }
 
+MaCSTS <- function(args, nChr, inbred, ploidy, nThreads, seed, usePhysicalPositions = FALSE, useMacsMut = FALSE, Nref = NA_real_, expandInbredSamples = TRUE) {
+    .Call(`_AlphaSimR_MaCSTS`, args, nChr, inbred, ploidy, nThreads, seed, usePhysicalPositions, useMacsMut, Nref, expandInbredSamples)
+}
+
 #' @title Summarise `tskit` table collection
 #' @param tc an external pointer to a \code{tsk_table_collection_t} object.
 #' @return A list.
@@ -424,5 +428,33 @@ rtsk_table_collection_summary2 <- function(tc) {
 #' @export
 rtsk_treeseq_get_num_individuals2 <- function(ts) {
     .Call(`_AlphaSimR_rtsk_treeseq_get_num_individuals2`, ts)
+}
+
+tsMutateTableCollection <- function(tc, theta, seed) {
+    invisible(.Call(`_AlphaSimR_tsMutateTableCollection`, tc, theta, seed))
+}
+
+tsFinalizeInbredTableCollection <- function(tc, ploidy) {
+    invisible(.Call(`_AlphaSimR_tsFinalizeInbredTableCollection`, tc, ploidy))
+}
+
+vcfFounderTableCollection <- function(haplo, pos, seqLen, ploidy, addTsMut) {
+    .Call(`_AlphaSimR_vcfFounderTableCollection`, haplo, pos, seqLen, ploidy, addTsMut)
+}
+
+tsForwardNodeTableAddRows <- function(tc, flags, time, population, individual) {
+    .Call(`_AlphaSimR_tsForwardNodeTableAddRows`, tc, flags, time, population, individual)
+}
+
+tsForwardNodeTableAddRowsWithMetadata <- function(tc, flags, time, population, individual, nodeKey) {
+    .Call(`_AlphaSimR_tsForwardNodeTableAddRowsWithMetadata`, tc, flags, time, population, individual, nodeKey)
+}
+
+tsForwardEdgeTableAddRows <- function(tc, left, right, parent, child) {
+    invisible(.Call(`_AlphaSimR_tsForwardEdgeTableAddRows`, tc, left, right, parent, child))
+}
+
+tsForwardSetSampleFlags <- function(tc, samples, clearExisting = TRUE) {
+    invisible(.Call(`_AlphaSimR_tsForwardSetSampleFlags`, tc, samples, clearExisting))
 }
 

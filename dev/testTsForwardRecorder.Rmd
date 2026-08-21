@@ -1,0 +1,1457 @@
+---
+title: "Forward TS recorder workflow and bridge comparison"
+output: html_document
+date: "2026-07-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## General Notes
+
+This notebook shows the current forward tree-sequence recording workflow.
+It uses the same forward simulation pattern as `dev/notesRealBreakpoints.md`:
+
+1. create founders from tree sequences,
+2. run a short AlphaSimR breeding loop,
+3. record meiosis breakpoints in forward time,
+4. compare the direct forward TS recorder with the older
+   `bridgeCollectSegGenFromSimOutput()` path,
+5. write `.trees` files that can be compared in Python.
+
+Two founder entry points are shown:
+
+1. start from `runMacsTS(...)`,
+2. start from existing msprime `.trees` files.
+
+### Main workflow differences between old "bridge" and forward ts recorder:
+
+| Aspect | Old bridge path | Current forward recorder |
+|---|---|---|
+| When TS edges are made | After simulation | During each cross |
+| Required recombination record | Stored `SP$recHistGen` | Temporary `tsSegGen` matrix only |
+| Main stored object during simulation | `SP$recHistGen` | `attr(SP, "tsForwardRecorder")` |
+| Segment data kept by default | Reconstructed later for bridge output | Not kept by default |
+| Role of `SP$pedigree` | Used with `recHistGen` to reconstruct child-parent edge relationships after simulation | Still used for TS individual parent links, node times, and default sample inference, but not as the main source of inheritance edges |
+| Recombination map source | Supplied in validation `chr_info` when bridge converts `recHistGen` to coordinates | Stored on the founder as `tsForwardPosMeta`; from `runMacsTS()` defaults/`-R` or explicit `asMapPop(chr_info)` maps |
+| User output function | `bridgeWriteTrees()` | `tsForwardFinalizeFromSimParam()` |
+| Metadata timing | Added when bridge writes trees | Added while recording nodes/individuals |
+| Edge append path | R row loop | C++ bulk append |
+| Child node append path | R row loop | C++ bulk append, with or without metadata |
+
+In short, the bridge path stores recombination history first and reconstructs
+tree-sequence rows later. The forward recorder uses transient meiosis segments
+to append tree-sequence rows immediately. It still uses pedigree information
+for TS individual rows and node timing, but normal use does not need to keep
+`recHistGen` or `tsSegGen`.
+
+## 1) Setup
+
+```{r libraries}
+library(RcppTskit)
+library(jsonlite)
+library(ggplot2)
+library(AlphaSimR)
+devtools::load_all()
+
+out_dir <- 'testData'
+```
+
+## 2) Validation Helpers
+
+These helpers are only for interpretation and validation. The actual workflow
+steps are kept in the main sections below so the user-facing process is clear.
+
+```{r helpers}
+normalize_edge_df <- function(df) {
+  out <- data.frame(
+    chr = as.integer(df$chr),
+    child = as.integer(df$child),
+    parent = as.integer(df$parent),
+    left = as.numeric(df$left),
+    right = as.numeric(df$right),
+    stringsAsFactors = FALSE
+  )
+  out <- out[out$right > out$left, , drop = FALSE]
+  if (nrow(out) == 0L) {
+    return(out)
+  }
+  ord <- order(out$chr, out$child, out$parent, out$left, out$right)
+  out <- out[ord, , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
+collect_forward_edges_for_children <- function(recorder, chr, child_iids) {
+  chrState <- recorder$chr[[chr]]
+  tc <- chrState$tc
+  n_edge <- as.integer(tc$num_edges())
+  out <- vector("list", n_edge)
+  k <- 0L
+
+  iid_keys <- ls(chrState$indMap, all.names = TRUE)
+  if (length(iid_keys) == 0L) {
+    return(data.frame(chr = integer(), child = integer(), parent = integer(),
+                      left = numeric(), right = numeric(), stringsAsFactors = FALSE))
+  }
+  ind_rows <- vapply(iid_keys, function(key) {
+    as.integer(get(key, envir = chrState$indMap, inherits = FALSE))
+  }, integer(1))
+  ind_row_to_iid <- setNames(as.integer(iid_keys), as.character(ind_rows))
+
+  for (i in seq_len(n_edge)) {
+    e <- tc$edge_table_get_row(i - 1L)
+    child_node <- as.integer(e$child)
+    parent_node <- as.integer(e$parent)
+    child_ind_row <- as.integer(tc$node_table_get_row(child_node)$individual)
+    parent_ind_row <- as.integer(tc$node_table_get_row(parent_node)$individual)
+
+    child_iid <- ind_row_to_iid[as.character(child_ind_row)]
+    parent_iid <- ind_row_to_iid[as.character(parent_ind_row)]
+    if (length(child_iid) == 0L || length(parent_iid) == 0L ||
+        is.na(child_iid) || is.na(parent_iid)) {
+      next
+    }
+    child_iid <- as.integer(child_iid)
+    if (!(child_iid %in% child_iids)) {
+      next
+    }
+
+    k <- k + 1L
+    out[[k]] <- data.frame(
+      chr = as.integer(chr),
+      child = child_iid,
+      parent = as.integer(parent_iid),
+      left = as.numeric(e$left),
+      right = as.numeric(e$right),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  if (k == 0L) {
+    return(data.frame(chr = integer(), child = integer(), parent = integer(),
+                      left = numeric(), right = numeric(), stringsAsFactors = FALSE))
+  }
+  do.call(rbind, out[seq_len(k)])
+}
+
+collect_forward_edges_all_chr <- function(recorder, child_iids) {
+  out <- lapply(seq_len(recorder$nChr), function(cc) {
+    collect_forward_edges_for_children(recorder, chr = cc, child_iids = child_iids)
+  })
+  normalize_edge_df(do.call(rbind, out))
+}
+
+collect_bridge_edges_for_children <- function(SP, sim_output, chr_info, child_iids) {
+  pos_list <- attr(sim_output[[1L]], "tsForwardPosMeta", exact = TRUE)$posList
+  bridge_list <- bridgeCollectSegGenFromSimOutput(
+    SP,
+    sim_output,
+    chr_info = chr_info,
+    pos_list = pos_list
+  )
+  if (length(bridge_list) == 0L) {
+    return(data.frame(chr = integer(), child = integer(), parent = integer(),
+                      left = numeric(), right = numeric(), stringsAsFactors = FALSE))
+  }
+  bridge_df <- do.call(rbind, bridge_list)
+  bridge_edges <- data.frame(
+    chr = as.integer(bridge_df$chr),
+    child = as.integer(bridge_df$childId),
+    parent = as.integer(bridge_df$parentId),
+    left = as.numeric(bridge_df$left),
+    right = as.numeric(bridge_df$right),
+    stringsAsFactors = FALSE
+  )
+  bridge_edges <- bridge_edges[bridge_edges$child %in% child_iids, , drop = FALSE]
+  normalize_edge_df(bridge_edges)
+}
+
+compare_direct_vs_bridge_edges <- function(recorder, SP, sim_output, chr_info) {
+  child_iids <- unlist(lapply(sim_output[-1L], function(pop) as.integer(pop@iid)), use.names = FALSE)
+  direct_edges <- collect_forward_edges_all_chr(recorder, child_iids = child_iids)
+  bridge_edges <- collect_bridge_edges_for_children(
+    SP = SP,
+    sim_output = sim_output,
+    chr_info = chr_info,
+    child_iids = child_iids
+  )
+
+  checks <- data.frame(
+    metric = c("n_edges", "chr_child_parent", "left", "right"),
+    equal = c(
+      nrow(direct_edges) == nrow(bridge_edges),
+      identical(direct_edges[, c("chr", "child", "parent"), drop = FALSE],
+                bridge_edges[, c("chr", "child", "parent"), drop = FALSE]),
+      isTRUE(all.equal(direct_edges$left, bridge_edges$left, tolerance = 1e-6)),
+      isTRUE(all.equal(direct_edges$right, bridge_edges$right, tolerance = 1e-6))
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  list(
+    checks = checks,
+    direct_edges = direct_edges,
+    bridge_edges = bridge_edges
+  )
+}
+
+edge_comparison_summary <- function(cmp) {
+  direct <- cmp$direct_edges
+  bridge <- cmp$bridge_edges
+  n <- min(nrow(direct), nrow(bridge))
+  same_ids <- if (n == 0L) {
+    nrow(direct) == nrow(bridge)
+  } else {
+    identical(direct[seq_len(n), c("chr", "child", "parent"), drop = FALSE],
+              bridge[seq_len(n), c("chr", "child", "parent"), drop = FALSE])
+  }
+  max_left_diff <- if (n == 0L) NA_real_ else max(abs(direct$left[seq_len(n)] - bridge$left[seq_len(n)]))
+  max_right_diff <- if (n == 0L) NA_real_ else max(abs(direct$right[seq_len(n)] - bridge$right[seq_len(n)]))
+
+  data.frame(
+    item = c(
+      "direct forward edge rows",
+      "bridge forward edge rows",
+      "same chr/child/parent ordering",
+      "max absolute left-coordinate difference",
+      "max absolute right-coordinate difference"
+    ),
+    value = c(
+      as.character(nrow(direct)),
+      as.character(nrow(bridge)),
+      as.character(same_ids),
+      as.character(signif(max_left_diff, 6)),
+      as.character(signif(max_right_diff, 6))
+    ),
+    stringsAsFactors = FALSE
+  )
+}
+
+edge_example_table <- function(cmp, n = 8L) {
+  direct <- cmp$direct_edges
+  bridge <- cmp$bridge_edges
+  n <- min(n, nrow(direct), nrow(bridge))
+  if (n == 0L) {
+    return(data.frame())
+  }
+  data.frame(
+    row = seq_len(n),
+    chr = direct$chr[seq_len(n)],
+    child = direct$child[seq_len(n)],
+    parent = direct$parent[seq_len(n)],
+    direct_left = direct$left[seq_len(n)],
+    bridge_left = bridge$left[seq_len(n)],
+    left_diff = direct$left[seq_len(n)] - bridge$left[seq_len(n)],
+    direct_right = direct$right[seq_len(n)],
+    bridge_right = bridge$right[seq_len(n)],
+    right_diff = direct$right[seq_len(n)] - bridge$right[seq_len(n)],
+    stringsAsFactors = FALSE
+  )
+}
+
+edge_example_table_by_chr <- function(cmp, n = 5L) {
+  direct <- cmp$direct_edges
+  out <- lapply(split(seq_len(nrow(direct)), direct$chr), function(idx) {
+    cmp_chr <- list(
+      direct_edges = cmp$direct_edges[idx, , drop = FALSE],
+      bridge_edges = cmp$bridge_edges[idx, , drop = FALSE]
+    )
+    edge_example_table(cmp_chr, n = n)
+  })
+  do.call(rbind, out)
+}
+
+
+find_extra_recHistGen_example <- function(SP) {
+  RHG <- SP$recHistGen
+  RH <- SP$recHist
+  if (is.null(RHG) || is.null(RH)) {
+    return(NULL)
+  }
+
+  as_rec_matrix <- function(x) {
+    if (is.null(x) || length(x) == 0L) {
+      return(NULL)
+    }
+    x <- as.matrix(x)
+    if (ncol(x) < 2L || nrow(x) == 0L) {
+      return(NULL)
+    }
+    x
+  }
+
+  for (iid in seq_along(RHG)) {
+    for (chr in seq_along(RHG[[iid]])) {
+      gm <- as.numeric(SP$genMap[[chr]])
+      for (hap in seq_along(RHG[[iid]][[chr]])) {
+        rhg <- as_rec_matrix(RHG[[iid]][[chr]][[hap]])
+        rh <- as_rec_matrix(RH[[iid]][[chr]][[hap]])
+        if (is.null(rhg) || is.null(rh) || nrow(rhg) <= nrow(rh)) {
+          next
+        }
+
+        next_marker <- findInterval(as.numeric(rhg[, 2]), gm) + 1L
+        next_marker <- pmin(pmax(next_marker, 1L), length(gm))
+        next_marker[seq_along(next_marker) == 1L] <- 1L
+        duplicated_marker <- unique(next_marker[-1L][duplicated(next_marker[-1L])])
+        if (length(duplicated_marker) == 0L) {
+          next
+        }
+
+        marker <- duplicated_marker[[1L]]
+        keep <- which(next_marker == marker)
+        keep <- seq(max(1L, min(keep) - 1L), min(nrow(rhg), max(keep) + 1L))
+        table_next_marker <- next_marker[keep]
+        table_left_marker <- ifelse(
+          table_next_marker > 1L,
+          gm[table_next_marker - 1L],
+          NA_real_
+        )
+        rhg_table <- data.frame(
+          row = keep,
+          source_hap = as.integer(rhg[keep, 1]),
+          breakpoint_morgan = as.numeric(rhg[keep, 2]),
+          next_marker = table_next_marker,
+          left_marker_morgan = table_left_marker,
+          right_marker_morgan = gm[table_next_marker],
+          stringsAsFactors = FALSE
+        )
+        rh_table <- data.frame(
+          row = seq_len(nrow(rh)),
+          source_hap = as.integer(rh[, 1]),
+          start_marker = as.integer(rh[, 2]),
+          start_marker_morgan = gm[pmin(pmax(as.integer(rh[, 2]), 1L), length(gm))],
+          stringsAsFactors = FALSE
+        )
+
+        return(list(
+          iid = iid,
+          chr = chr,
+          hap = hap,
+          marker = marker,
+          rhg_table = rhg_table,
+          rh_table = rh_table
+        ))
+      }
+    }
+  }
+  NULL
+}
+```
+
+## 3) Entry Point A: Start With `runMacsTS`
+
+`runMacsTS()` returns a `MapPop` plus TS table pointers when `returnTs=TRUE`.
+For the new direct recorder path, use `mac_out$pop` directly. The extra
+file-backed `chr_info` below is only for the old bridge comparison functions,
+because those functions still expect `chr_info[[cc]]$ts_path`.
+
+```{r runMacsTS-founders}
+set.seed(42)
+
+# Step 1A: create founder tree sequences with runMacsTS.
+mac_out <- AlphaSimR:::runMacsTS(
+  nInd = 4,
+  nChr = 2,
+  segSites = c(60L, 120L),
+  inbred = FALSE,
+  ploidy = 2L,
+  species = "GENERIC",
+  mutationMode = "postTs",
+  usePhysicalPositions = TRUE,
+  nThreads = 1L,
+  returnTs = TRUE
+)
+
+# Direct forward-recorder input: use the MapPop returned by runMacsTS.
+mac_founder <- mac_out$pop
+
+# Old bridge input: bridgeCollectSegGenFromSimOutput()/bridgeWriteTrees() still
+# use chr_info[[cc]]$ts_path, so this validation-only helper writes the in-memory
+# runMacsTS founder tables to files and reconstructs the bridge rate map.
+mac_bridge_chr_info <- AlphaSimR:::runMacsTSBridgeChrInfo(
+  mac_out,
+  out_dir = out_dir,
+  out_basename = "runMacsTS_founder"
+)
+```
+
+### Forward Simulation With Direct TS Recorder
+
+```{r runMacsTS-forward}
+# Step 2A: run the forward simulator and let the direct TS recorder update
+# tables during meiosis. Keep recHistGen only for validation against the old
+# bridge path.
+old_opts_mac <- options(
+  AlphaSimR.tsForwardKeepSeg = FALSE,
+  AlphaSimR.tsForwardKeepRecHistGen = TRUE
+)
+
+set.seed(42)
+mac_SP <- SimParam$new(mac_founder)
+mac_SP$nThreads <- 1L
+mac_SP$quadProb <- 0
+mac_SP$setSexes("yes_sys")
+mac_SP$addTraitA(nQtlPerChr = 5, mean = 500, var = 450)
+mac_SP$setTrackPed(TRUE)
+mac_SP$setTrackRecGen(TRUE)
+
+mac_basePop <- newPop(mac_founder, simParam = mac_SP)
+mac_SP$setTrackTs(TRUE, founderPop = mac_basePop)
+mac_basePop <- setPheno(mac_basePop, h2 = 0.5, simParam = mac_SP)
+
+mac_sim_output <- list(mac_basePop)
+for (cycle in seq_len(2L)) {
+  prev <- mac_sim_output[[cycle]]
+  chosen <- selectInd(pop = prev, nInd = min(6L, nInd(prev)), use = "gv", simParam = mac_SP)
+  offspring <- randCross(pop = chosen, nCrosses = 2L, nProgeny = 5L, simParam = mac_SP)
+  offspring <- setPheno(pop = offspring, h2 = 0.5, simParam = mac_SP)
+  mac_sim_output[[cycle + 1L]] <- offspring
+}
+
+# Only for debugging and validation; for users, run tsForwardFinalizeFromSimParam() to write .trees files (see below).
+mac_recorder <- attr(mac_SP, "tsForwardRecorder", exact = TRUE)
+mac_recorder
+stopifnot(inherits(mac_recorder, "tsForwardRecorder"))
+# restore options
+options(old_opts_mac)
+```
+
+### Compare Direct Recorder With The Old Bridge Path
+
+Each row in these edge tables means: for one child haplotype, the interval
+`[left, right)` on chromosome `chr` inherited from `parent`. The direct recorder
+appends these intervals directly to the TS edge table during crossing. The old
+bridge path reconstructs the same intervals later from `recHistGen`.
+
+
+The comparison is about the forward-added inheritance edges for offspring
+created after the founder generation. A single edge row means:
+
+- `chr`: chromosome index in AlphaSimR,
+- `child`: AlphaSimR individual id for the offspring,
+- `parent`: AlphaSimR individual id for the parent that contributed this interval,
+- `left`, `right`: the half-open tree-sequence interval `[left, right)`.
+
+The direct recorder writes these intervals to the TS edge table during crossing.
+The bridge path reconstructs them later from `recHistGen` using
+`bridgeCollectSegGenFromSimOutput()`. The summary table reports both edge-row
+counts and the maximum absolute coordinate difference. The example table then
+prints paired direct/bridge rows so the agreement can be inspected directly,
+not just as a `TRUE`/`FALSE` result.
+
+Expected result:
+
+- direct and bridge edge counts should be the same,
+- `same chr/child/parent ordering` should be `TRUE`,
+- max absolute left/right differences should be zero or within floating-point
+  tolerance,
+- the direct and bridge `.trees` files should have matching forward-added edge
+  structure and can be inspected further with Python/tskit.
+
+```{r runMacsTS-compare}
+mac_cmp <- compare_direct_vs_bridge_edges(
+  recorder = mac_recorder,
+  SP = mac_SP,
+  sim_output = mac_sim_output,
+  chr_info = mac_bridge_chr_info
+)
+
+knitr::kable(edge_comparison_summary(mac_cmp))
+#knitr::kable(edge_example_table(mac_cmp, n = 30L))
+knitr::kable(edge_example_table_by_chr(mac_cmp, n = 5L), digits = 3,
+  format.args = list(scientific = FALSE, nsmall = 3)
+)
+```
+
+### Write Comparable Tree Files
+
+```{r runMacsTS-write-trees}
+mac_direct_paths <- tsForwardFinalizeFromSimParam(
+  mac_SP,
+  out_dir = out_dir,
+  out_basename = "runMacsTS_direct",
+  clear = FALSE
+)
+
+# keep founder nodes; nodes in the current generation and nodes in their pedigree
+mac_direct_simplified_paths <- tsForwardFinalizeFromSimParam(
+  mac_SP,
+  out_dir = out_dir,
+  out_basename = "runMacsTS_direct_simplified_keep_unary",
+  simplify = TRUE,
+  keep_unary = TRUE,
+  clear = FALSE
+)
+
+mac_bridge_list <- bridgeCollectSegGenFromSimOutput(
+  mac_SP,
+  mac_sim_output,
+  chr_info = mac_bridge_chr_info,
+  pos_list = attr(mac_sim_output[[1L]], "tsForwardPosMeta", exact = TRUE)$posList
+)
+mac_bridge_df <- do.call(rbind, mac_bridge_list)
+bridgeWriteTrees(
+  chr_info = mac_bridge_chr_info,
+  edgeDf = mac_bridge_df,
+  SP = mac_SP,
+  out_dir = out_dir,
+  out_basename = "runMacsTS_bridge"
+)
+mac_bridge_paths <- file.path(out_dir, paste0("runMacsTS_bridge_chr", seq_along(mac_bridge_chr_info) - 1L, ".trees"))
+
+mac_tree_paths <- data.frame(
+  chr = seq_along(mac_bridge_chr_info),
+  direct_path = mac_direct_paths,
+  direct_simplified_path = mac_direct_simplified_paths,
+  bridge_path = mac_bridge_paths,
+  direct_exists = file.exists(mac_direct_paths),
+  direct_simplified_exists = file.exists(mac_direct_simplified_paths),
+  bridge_exists = file.exists(mac_bridge_paths),
+  stringsAsFactors = FALSE
+)
+mac_tree_paths
+```
+
+## 4) Entry Point B: Start With Existing msprime Tree Files
+
+This mirrors the setup in `dev/notesRealBreakpoints.md`. The recombination map
+is supplied explicitly in `chr_info`. Here the rates are deliberately higher
+than the original msprime examples, on the order of `1e-6`, so the forward
+simulation creates more crossing-over events, including events between retained
+markers.
+
+```{r msprime-founders}
+L1 <- 1e6
+L2 <- 2e6
+msprime_chr_info <- list(
+  list(
+    ts_path = paste0(out_dir, "/msprime_chr0.trees"),
+    breaks = c(0, L1 / 2, L1),
+    rates = c(5e-5, 5e-6),
+    segSites = 60L
+  ),
+  list(
+    ts_path = paste0(out_dir, "/msprime_chr1.trees"),
+    breaks = c(0, L2 / 3, 2 * L2 / 3, L2),
+    rates = c(5e-7, 5e-6, 5e-7),
+    segSites = 155L
+  )
+)
+
+stopifnot(all(file.exists(vapply(msprime_chr_info, `[[`, character(1), "ts_path"))))
+
+msprime_founder <- asMapPop(
+  chr_info = msprime_chr_info,
+  inbred = FALSE,
+  ploidy = 2L
+)
+```
+
+### Forward Simulation With Direct TS Recorder
+
+```{r msprime-forward}
+# Step 2B: run the same forward TS recording process, now starting from
+# existing msprime tree files.
+old_opts_msprime <- options(
+  AlphaSimR.tsForwardKeepSeg = FALSE,
+  AlphaSimR.tsForwardKeepRecHistGen = TRUE
+)
+
+set.seed(42)
+msprime_SP <- SimParam$new(msprime_founder)
+msprime_SP$nThreads <- 1L
+msprime_SP$quadProb <- 0
+msprime_SP$setSexes("no")
+msprime_SP$addTraitA(nQtlPerChr = 5, mean = 500, var = 450)
+msprime_SP$setTrackPed(TRUE)
+msprime_SP$setTrackRecGen(TRUE)
+
+msprime_basePop <- newPop(msprime_founder, simParam = msprime_SP)
+msprime_SP$setTrackTs(TRUE, founderPop = msprime_basePop)
+msprime_basePop <- setPheno(msprime_basePop, h2 = 0.5, simParam = msprime_SP)
+
+msprime_sim_output <- list(msprime_basePop)
+for (cycle in seq_len(2L)) {
+  prev <- msprime_sim_output[[cycle]]
+  chosen <- selectInd(pop = prev, nInd = min(2L, nInd(prev)), use = "gv", simParam = msprime_SP)
+  offspring <- randCross(pop = chosen, nCrosses = 1L, nProgeny = 5L, simParam = msprime_SP)
+  offspring <- setPheno(pop = offspring, h2 = 0.5, simParam = msprime_SP)
+  msprime_sim_output[[cycle + 1L]] <- offspring
+}
+
+msprime_recorder <- attr(msprime_SP, "tsForwardRecorder", exact = TRUE)
+stopifnot(inherits(msprime_recorder, "tsForwardRecorder"))
+options(old_opts_msprime)
+```
+
+### Compare Direct Recorder With The Old Bridge Path
+
+```{r msprime-compare}
+msprime_cmp <- compare_direct_vs_bridge_edges(
+  recorder = msprime_recorder,
+  SP = msprime_SP,
+  sim_output = msprime_sim_output,
+  chr_info = msprime_chr_info
+)
+
+knitr::kable(edge_comparison_summary(msprime_cmp))
+#knitr::kable(edge_example_table(msprime_cmp, n = 10L))
+knitr::kable(edge_example_table_by_chr(msprime_cmp, n = 5L), digits = 3,
+  format.args = list(scientific = FALSE, nsmall = 3)
+)
+```
+
+### Recombination Breakpoints Between Markers
+
+The comparison above uses `bridgeCollectSegGenFromSimOutput()`, so the bridge
+side is reconstructed from `recHistGen`. When the direct-recorder edges match
+that bridge output, it means the forward recorder is using the same breakpoint
+resolution as `recHistGen`.
+
+The marker-index `recHist` representation can still miss double crossing-over
+events that happen between the same two retained markers, because the marker
+ancestry can return to the same state before the next marker.
+
+```{r msprime-double-crossover}
+double_example <- find_extra_recHistGen_example(msprime_SP)
+if (is.null(double_example)) {
+  cat("No between-marker double-crossover example found in this seeded run.\n")
+} else {
+  cat(
+    "Check ind", double_example$iid,
+    "; chr", double_example$chr,
+    "; hap", double_example$hap, "\n"
+  )
+
+  RHG <- msprime_SP$recHistGen
+  RH <- msprime_SP$recHist
+  gm <- msprime_SP$genMap[[double_example$chr]]
+
+  rh <- as.matrix(RH[[double_example$iid]][[double_example$chr]][[double_example$hap]])
+  rhg <- as.matrix(RHG[[double_example$iid]][[double_example$chr]][[double_example$hap]])
+
+  cat(
+    "recHistGen has", nrow(rhg) - nrow(rh),
+    "more recorded recombination events than recHist.\n"
+  )
+
+  cat("\nrecHist: marker-index ancestry changes\n")
+  print(rh)
+  cat("\nrecHistGen: actual breakpoint positions in Morgan\n")
+  print(rhg)
+
+  x <- as.numeric(rhg[, 2])
+  left <- findInterval(x, gm)
+  left <- pmax(left, 1L)
+  right <- pmin(left + 1L, length(gm))
+
+  recHistGen_intervals <- data.frame(
+    x = x,
+    left_i = left,
+    left_v = gm[left],
+    right_i = right,
+    right_v = gm[right],
+    stringsAsFactors = FALSE
+  )
+
+  cat("\nSNP interval containing each recHistGen breakpoint\n")
+  print(recHistGen_intervals)
+}
+```
+
+Rows in the interval table with the same `left_i` and `right_i` are multiple
+breakpoints between the same two retained SNPs. These are retained by
+`recHistGen`, and therefore by the forward TS recorder, but they are collapsed
+in marker-index `recHist`.
+
+### Write Comparable Tree Files
+
+```{r msprime-write-trees}
+msprime_direct_paths <- tsForwardFinalizeFromSimParam(
+  msprime_SP,
+  out_dir = out_dir,
+  out_basename = "msprime_direct",
+  clear = FALSE
+)
+
+# keep founder nodes; nodes in the current generation and nodes in their pedigree
+msprime_direct_simplified_paths <- tsForwardFinalizeFromSimParam(
+  msprime_SP,
+  out_dir = out_dir,
+  out_basename = "msprime_direct_simplified_keep_unary",
+  simplify = TRUE,
+  keep_unary = TRUE,
+  clear = FALSE
+)
+
+msprime_bridge_list <- bridgeCollectSegGenFromSimOutput(
+  msprime_SP,
+  msprime_sim_output,
+  chr_info = msprime_chr_info,
+  pos_list = attr(msprime_sim_output[[1L]], "tsForwardPosMeta", exact = TRUE)$posList
+)
+msprime_bridge_df <- do.call(rbind, msprime_bridge_list)
+bridgeWriteTrees(
+  chr_info = msprime_chr_info,
+  edgeDf = msprime_bridge_df,
+  SP = msprime_SP,
+  out_dir = out_dir,
+  out_basename = "msprime_bridge"
+)
+msprime_bridge_paths <- file.path(out_dir, paste0("msprime_bridge_chr", seq_along(msprime_chr_info) - 1L, ".trees"))
+
+msprime_tree_paths <- data.frame(
+  chr = seq_along(msprime_chr_info),
+  direct_path = msprime_direct_paths,
+  direct_simplified_path = msprime_direct_simplified_paths,
+  bridge_path = msprime_bridge_paths,
+  direct_exists = file.exists(msprime_direct_paths),
+  direct_simplified_exists = file.exists(msprime_direct_simplified_paths),
+  bridge_exists = file.exists(msprime_bridge_paths),
+  stringsAsFactors = FALSE
+)
+
+```
+
+```{r combine-tree-paths}
+tree_path_cols <- c(
+  "chr",
+  "direct_path",
+  "direct_simplified_path",
+  "bridge_path",
+  "direct_exists",
+  "direct_simplified_exists",
+  "bridge_exists"
+)
+align_tree_path_cols <- function(x) {
+  missing_cols <- setdiff(tree_path_cols, names(x))
+  for (col in missing_cols) {
+    x[[col]] <- NA
+  }
+  x[, tree_path_cols, drop = FALSE]
+}
+all_tree_paths <- rbind(
+  align_tree_path_cols(mac_tree_paths),
+  align_tree_path_cols(msprime_tree_paths)
+)
+all_tree_paths
+```
+
+## 5) Files To Compare In Python And Interpret
+
+Use the following Python code outside R, or run the chunk after configuring a
+Python environment with `tskit` installed.
+```{r py-setup}
+# Use your own path here!
+reticulate::use_python("/usr/bin/python3", required = TRUE)
+library(reticulate)
+reticulate::py_config()
+```
+
+```{r python-paths}
+python_pairs <- data.frame(
+  label = c("runMacsTS chr0", "runMacsTS chr1", "msprime chr0", "msprime chr1"),
+  direct_path = normalizePath(all_tree_paths$direct_path, mustWork = FALSE),
+  bridge_path = normalizePath(all_tree_paths$bridge_path, mustWork = FALSE),
+  stringsAsFactors = FALSE
+)
+library(reticulate)
+pairs_obj <- lapply(seq_len(nrow(python_pairs)), function(i) {
+  as.list(python_pairs[i, , drop = FALSE])
+})
+reticulate::py_run_string("pairs = r.pairs_obj")
+```
+
+```{python compare-tree-files}
+from pathlib import Path
+import tskit
+
+required_fields = {"direct_path", "bridge_path"}
+missing = required_fields - set(pairs[0])
+if missing:
+    raise ValueError(f"python_pairs is missing {sorted(missing)}. Rerun the python-paths R chunk.")
+
+def direct_simplified_path(direct_path):
+    path = Path(direct_path)
+    return path.with_name(
+        path.name.replace("_direct_chr", "_direct_simplified_keep_unary_chr")
+    )
+
+for row in pairs:
+    print(row)
+    direct = tskit.load(row["direct_path"])
+    direct_simplified = tskit.load(direct_simplified_path(row["direct_path"]))
+    bridge = tskit.load(row["bridge_path"])
+    print(row["label"])
+    print("  order: direct, bridge, direct_simplified_keep_unary")
+    print("  nodes:", direct.num_nodes, bridge.num_nodes, direct_simplified.num_nodes)
+    print("  edges:", direct.num_edges, bridge.num_edges, direct_simplified.num_edges)
+    print("  trees:", direct.num_trees, bridge.num_trees, direct_simplified.num_trees)
+    print("  sites:", direct.num_sites, bridge.num_sites, direct_simplified.num_sites)
+```
+
+Print one tree from each differently generated result. The simplified direct
+files are generated above by
+`tsForwardFinalizeFromSimParam(..., simplify = TRUE, keep_unary = TRUE)`.
+
+```{python print-example-trees}
+
+for row in pairs:
+    if row["label"] not in {"msprime chr0"}:
+        continue
+    for method in ["direct", "bridge"]:
+        ts_path = Path(row[f"{method}_path"])
+        ts = tskit.load(ts_path)
+
+        print(f"\n{row['label']} - {method}")
+        print("original counts")
+        print("  trees:", ts.num_trees)
+        print("  nodes:", ts.num_nodes)
+        print("  edges:", ts.num_edges)
+        print(ts.first().draw_text())
+
+    direct = tskit.load(row["direct_path"])
+    simplified_path = direct_simplified_path(row["direct_path"])
+    simplified = tskit.load(simplified_path)
+    print(f"\n{row['label']} - direct simplified by AlphaSimR finalize, keep_unary=True")
+    print("  path:", simplified_path)
+    print("  trees:", simplified.num_trees, "reduced by", direct.num_trees - simplified.num_trees)
+    print("  nodes:", simplified.num_nodes, "reduced by", direct.num_nodes - simplified.num_nodes)
+    print("  edges:", simplified.num_edges, "reduced by", direct.num_edges - simplified.num_edges)
+    print(simplified.first().draw_text())
+
+# see the information of the only offspring of founder node 1    
+print(direct.node(270))
+print(simplified.node(24))
+
+print(direct.individual(17))
+print(simplified.individual(14))
+```
+
+Print and draw pedigrees from the same files:
+
+```{python print-pedigrees}
+from pathlib import Path
+import tskit
+from matplotlib import pyplot as plt
+import networkx as nx
+
+def draw_pedigree(ped_ts, title):
+    plt.figure(figsize=(8, 5))
+
+    G = nx.DiGraph()
+    for ind in ped_ts.individuals():
+        if len(ind.nodes) == 0:
+            continue
+        time = ped_ts.node(ind.nodes[0]).time
+        pop = ped_ts.node(ind.nodes[0]).population
+        G.add_node(ind.id, time=time, population=pop)
+        for p in ind.parents:
+            if p != tskit.NULL:
+                G.add_edge(ind.id, p)
+
+    pos = nx.multipartite_layout(G, subset_key="time", align="horizontal")
+    colours = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    node_colours = [
+        colours[attr["population"] % len(colours)]
+        for attr in G.nodes.values()
+    ]
+
+    nx.draw_networkx(G, pos, with_labels=True, node_color=node_colours)
+    plt.title(title)
+    plt.show()
+    plt.close()
+
+print(pairs)
+for row in pairs:
+    if row["label"] not in ["msprime chr1", "runMacsTS chr1"]:
+        continue
+    #print(row)
+    paths = {
+        "direct": row["direct_path"],
+        "bridge": row["bridge_path"],
+        "direct_simplified": direct_simplified_path(row["direct_path"])
+    }
+
+    for method, path in paths.items():
+        print(row)
+        ts = tskit.load(path)
+        print(f"\n{row['label']} - {method}")
+        draw_pedigree(ts, f"{row['label']} - {method}")
+```
+
+## 6) Test Recombination Map Handling
+
+This section checks how recombination-map information is carried from founder
+generation into the forward simulation and the direct TS recorder. When
+`runMacsTS()` is run with a MaCS `-R` hotspot file, the resulting founder keeps
+that map metadata, so the forward recorder can use it without additional user
+input. When `asMapPop(chr_info = list(..., breaks = ..., rates = ...))` is used,
+the explicit `breaks/rates` input controls the founder `genMap` used by the
+forward simulation.
+
+We test this because there are two separate sources of recombination-map
+information: the map used to generate the MaCS ancestry, and the map stored on
+the founder for later AlphaSimR forward recombination. These examples check that
+the forward edge-start distribution follows the map available to the forward
+simulation, including the case where constant-rate MaCS ancestry is rebuilt with
+an explicit non-constant map for the forward stage.
+
+The four cases are:
+
+1. constant recombination map from the normal `runMacsTS()` path,
+2. constant-rate `runMacsTS()` ancestry rebuilt with explicit hotspot
+   `breaks/rates` for the forward simulation,
+3. MaCS `-R` hotspot file parsed automatically by `runMacsTS()`,
+4. MaCS `-R` ancestry tables rebuilt with explicit `breaks/rates` through
+   `asMapPop(chr_info = list(tables = ...))`.
+
+The dashed lines in the plot show the expected number of edge starts per
+window: number of transmitted haplotypes times the window's genetic length.
+
+```{r runmacts-recombination-map-edge-windows}
+recomb_test_bp <- 1e8
+recomb_test_Ne <- 100
+recomb_test_mut_rate <- 2.5e-8
+recomb_test_rec_rate <- 1e-8
+recomb_test_seg_sites <- 80L
+recomb_test_window_bp <- 1e7
+recomb_test_n_forward_gen <- 2L
+recomb_test_n_crosses <- 3L
+recomb_test_n_progeny <- 5L
+recomb_test_ploidy <- 2L
+recomb_test_hotspot_lines <- c("0.2 0.3 5", "0.6 0.8 0.1")
+recomb_test_hotspot_path <- file.path(out_dir, "runMacsTS_hotspots_for_window_counts.txt")
+
+edge_start_window_counts <- function(edges, seq_len, window_bp = 1e7) {
+  starts <- seq(0, seq_len - window_bp, by = window_bp)
+  ends <- pmin(starts + window_bp, seq_len)
+  edge_starts <- edges$left[edges$left > 0 & edges$left < seq_len]
+  data.frame(
+    window = seq_along(starts),
+    window_start = starts,
+    window_end = ends,
+    n_edge_starts = vapply(seq_along(starts), function(i) {
+      sum(edge_starts >= starts[[i]] & edge_starts < ends[[i]])
+    }, integer(1)),
+    stringsAsFactors = FALSE
+  )
+}
+
+run_forward_edge_windows <- function(founder, rep_id, case, seq_len, window_bp = 1e7) {
+  SP <- SimParam$new(founder)
+  SP$nThreads <- 1L
+  SP$quadProb <- 0
+  SP$setTrackPed(TRUE)
+
+  base_pop <- newPop(founder, simParam = SP)
+  SP$setTrackTs(TRUE, founderPop = base_pop)
+
+  set.seed(10000L + rep_id)
+  sim_output <- list(base_pop)
+  for (gen in seq_len(recomb_test_n_forward_gen)) {
+    sim_output[[gen + 1L]] <- randCross(
+      pop = sim_output[[gen]],
+      nCrosses = recomb_test_n_crosses,
+      nProgeny = recomb_test_n_progeny,
+      simParam = SP
+    )
+  }
+
+  recorder <- attr(SP, "tsForwardRecorder", exact = TRUE)
+  child_iids <- unlist(lapply(sim_output[-1L], function(pop) as.integer(pop@iid)), use.names = FALSE)
+  edges <- collect_forward_edges_all_chr(recorder, child_iids = child_iids)
+  out <- edge_start_window_counts(edges, seq_len = seq_len, window_bp = window_bp)
+  out$rep <- rep_id
+  out$case <- case
+  out
+}
+
+expected_edge_start_windows <- function(seq_len, window_bp, breaks, rates,
+                                        n_meioses, expected_map) {
+  starts <- seq(0, seq_len - window_bp, by = window_bp)
+  ends <- pmin(starts + window_bp, seq_len)
+  genetic_span <- rateMap2cumMorgan(ends, breaks, rates) -
+    rateMap2cumMorgan(starts, breaks, rates)
+  data.frame(
+    window = seq_along(starts),
+    window_start = starts,
+    window_end = ends,
+    window_mid = (starts + ends) / 2,
+    expected_edge_starts = n_meioses * genetic_span,
+    expected_map = expected_map,
+    stringsAsFactors = FALSE
+  )
+}
+
+runmacts_recombination_map_replicate <- function(rep_id) {
+  bp <- recomb_test_bp
+  Ne <- recomb_test_Ne
+  mut_rate <- recomb_test_mut_rate
+  rec_rate <- recomb_test_rec_rate
+  seg_sites <- recomb_test_seg_sites
+
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  writeLines(recomb_test_hotspot_lines, recomb_test_hotspot_path)
+
+  old_opts <- options(
+    AlphaSimR.tsForwardAttachMetadata = TRUE,
+    AlphaSimR.tsForwardKeepSeg = FALSE,
+    AlphaSimR.tsForwardKeepRecHistGen = FALSE
+  )
+  on.exit(options(old_opts), add = TRUE)
+
+  manual_command <- paste(
+    bp,
+    "-t", 4 * Ne * mut_rate,
+    "-r", 4 * Ne * rec_rate,
+    "-R", recomb_test_hotspot_path
+  )
+
+  explicit_forward_map <- AlphaSimR:::.runMacsTS_map_from_hotspots(
+    path = recomb_test_hotspot_path,
+    nChr = 1,
+    seqLen = bp,
+    genLen = rec_rate * bp,
+    usePhysicalPositions = TRUE
+  )
+
+  constant_seed <- as.integer(20000L + rep_id)
+  constant_mut_seed <- as.integer(25000L + rep_id)
+  constant_site_seed <- as.integer(30000L + rep_id)
+
+  run_constant_macs <- function() {
+    AlphaSimR:::runMacsTS(
+      nInd = 4,
+      nChr = 1,
+      segSites = seg_sites,
+      inbred = FALSE,
+      ploidy = recomb_test_ploidy,
+      species = "GENERIC",
+      mutationMode = "postTs",
+      usePhysicalPositions = TRUE,
+      nThreads = 1L,
+      seed = constant_seed,
+      mutSeed = constant_mut_seed,
+      siteSamplingSeed = constant_site_seed,
+      returnTs = TRUE
+    )
+  }
+
+  # Group 1 source: constant-rate MaCS ancestry with the default constant
+  # forward map retained from runMacsTS().
+  constant_out <- run_constant_macs()
+
+  # Group 2 source: an independent copy of the same constant-rate MaCS
+  # ancestry, rebuilt below with explicit hotspot breaks/rates.
+  constant_out_custom_map <- run_constant_macs()
+
+  # Group 2: constant-rate MaCS ancestry, but explicit hotspot breaks/rates
+  # are supplied to asMapPop() so the forward simulation uses the custom map.
+  constant_founder_custom_forward_map <- asMapPop(
+    chr_info = list(
+      tables = constant_out_custom_map$tables,
+      breaks = explicit_forward_map$breaks,
+      rates = explicit_forward_map$rates
+    ),
+    inbred = FALSE,
+    ploidy = recomb_test_ploidy,
+    segSites = seg_sites,
+    site_sampling_seed = constant_site_seed,
+    nThreads = 1L
+  )
+
+  hotspot_seed <- as.integer(40000L + rep_id)
+  hotspot_mut_seed <- as.integer(45000L + rep_id)
+  hotspot_site_seed <- as.integer(50000L + rep_id)
+
+  run_hotspot_macs <- function() {
+    AlphaSimR:::runMacsTS(
+      nInd = 4,
+      nChr = 1,
+      segSites = seg_sites,
+      inbred = FALSE,
+      ploidy = recomb_test_ploidy,
+      manualCommand = manual_command,
+      manualGenLen = rec_rate * bp,
+      mutationMode = "postTs",
+      usePhysicalPositions = TRUE,
+      nThreads = 1L,
+      seed = hotspot_seed,
+      mutSeed = hotspot_mut_seed,
+      siteSamplingSeed = hotspot_site_seed,
+      returnTs = TRUE
+    )
+  }
+
+  # Group 3 source: MaCS -R ancestry where runMacsTS() automatically retains
+  # the hotspot map metadata for the forward simulation.
+  hotspot_out_auto <- run_hotspot_macs()
+
+  # Group 4 source: an independent copy of the same MaCS -R ancestry, rebuilt
+  # below with explicit hotspot breaks/rates.
+  hotspot_out_explicit <- run_hotspot_macs()
+
+  hotspot_pos_meta <- attr(hotspot_out_explicit$pop, "tsForwardPosMeta", exact = TRUE)
+
+  # Group 4: MaCS -R ancestry rebuilt with the same explicit hotspot
+  # breaks/rates through asMapPop().
+  explicit_founder <- asMapPop(
+    chr_info = list(
+      tables = hotspot_out_explicit$tables,
+      breaks = hotspot_pos_meta$breaksList,
+      rates = hotspot_pos_meta$ratesList
+    ),
+    inbred = FALSE,
+    ploidy = recomb_test_ploidy,
+    segSites = seg_sites,
+    site_sampling_seed = as.integer(50000L + rep_id),
+    nThreads = 1L
+  )
+
+  do.call(rbind, list(
+    # Group 1: constant-rate MaCS ancestry and constant-rate forward map.
+    run_forward_edge_windows(
+      founder = constant_out$pop,
+      rep_id = rep_id,
+      case = "constant",
+      seq_len = bp
+    ),
+    # Group 2: constant-rate MaCS ancestry and explicit hotspot forward map.
+    run_forward_edge_windows(
+      founder = constant_founder_custom_forward_map,
+      rep_id = rep_id,
+      case = "constant_ancestry_explicit_forward_map",
+      seq_len = bp
+    ),
+    # Group 3: MaCS -R ancestry and automatically retained hotspot map.
+    run_forward_edge_windows(
+      founder = hotspot_out_auto$pop,
+      rep_id = rep_id,
+      case = "macs_R_auto",
+      seq_len = bp
+    ),
+    # Group 4: MaCS -R ancestry and explicit hotspot forward map.
+    run_forward_edge_windows(
+      founder = explicit_founder,
+      rep_id = rep_id,
+      case = "macs_R_explicit_breaks_rates",
+      seq_len = bp
+    )
+  ))
+}
+
+edge_window_reps <- do.call(rbind, lapply(seq_len(50L), runmacts_recombination_map_replicate))
+
+expected_n_meioses <- recomb_test_n_forward_gen *
+  recomb_test_n_crosses *
+  recomb_test_n_progeny *
+  recomb_test_ploidy
+
+expected_hotspot_map <- AlphaSimR:::.runMacsTS_map_from_hotspots(
+  path = recomb_test_hotspot_path,
+  nChr = 1,
+  seqLen = recomb_test_bp,
+  genLen = recomb_test_rec_rate * recomb_test_bp,
+  usePhysicalPositions = TRUE
+)
+
+expected_edge_windows <- rbind(
+  expected_edge_start_windows(
+    seq_len = recomb_test_bp,
+    window_bp = recomb_test_window_bp,
+    breaks = c(0, recomb_test_bp),
+    rates = c(recomb_test_rec_rate),
+    n_meioses = expected_n_meioses,
+    expected_map = "expected_constant_rate"
+  ),
+  expected_edge_start_windows(
+    seq_len = recomb_test_bp,
+    window_bp = recomb_test_window_bp,
+    breaks = expected_hotspot_map$breaks[[1]],
+    rates = expected_hotspot_map$rates[[1]],
+    n_meioses = expected_n_meioses,
+    expected_map = "expected_hotspot_map"
+  )
+)
+
+edge_window_summary <- aggregate(
+  n_edge_starts ~ case + window + window_start + window_end,
+  data = edge_window_reps,
+  FUN = function(x) c(mean = mean(x), sd = stats::sd(x))
+)
+edge_window_summary <- do.call(data.frame, edge_window_summary)
+names(edge_window_summary)[names(edge_window_summary) == "n_edge_starts.mean"] <- "mean_edge_starts"
+names(edge_window_summary)[names(edge_window_summary) == "n_edge_starts.sd"] <- "sd_edge_starts"
+edge_window_summary <- edge_window_summary[
+  order(edge_window_summary$case, edge_window_summary$window),
+  ,
+  drop = FALSE
+]
+rownames(edge_window_summary) <- NULL
+
+edge_window_summary
+```
+
+```{r runmacts-recombination-map-edge-start-plot}
+edge_window_summary$window_mid <- (
+  edge_window_summary$window_start + edge_window_summary$window_end
+) / 2
+
+edge_cases <- unique(edge_window_summary$case)
+edge_cols <- setNames(c("#1B9E77", "#D95F02", "#7570B3", "#E7298A")[seq_along(edge_cases)], edge_cases)
+expected_cols <- c(
+  expected_constant_rate = "#555555",
+  expected_hotspot_map = "#000000"
+)
+window_width <- min(diff(sort(unique(edge_window_summary$window_mid))))
+edge_offsets <- setNames(
+  seq(-0.18, 0.18, length.out = length(edge_cases)) * window_width,
+  edge_cases
+)
+
+min_positive_y <- min(
+  c(
+    edge_window_summary$mean_edge_starts[edge_window_summary$mean_edge_starts > 0],
+    expected_edge_windows$expected_edge_starts[expected_edge_windows$expected_edge_starts > 0]
+  ),
+  na.rm = TRUE
+)
+if (!is.finite(min_positive_y)) {
+  min_positive_y <- 1
+}
+edge_window_summary$plot_x <- edge_window_summary$window_mid +
+  edge_offsets[as.character(edge_window_summary$case)]
+edge_window_summary$ymin <- pmax(
+  edge_window_summary$mean_edge_starts - edge_window_summary$sd_edge_starts,
+  min_positive_y / 2
+)
+edge_window_summary$ymax <- pmax(
+  edge_window_summary$mean_edge_starts + edge_window_summary$sd_edge_starts,
+  min_positive_y / 2
+)
+
+ggplot(
+  edge_window_summary,
+  aes(
+    x = plot_x,
+    y = mean_edge_starts,
+    color = case,
+    group = case
+  )
+) +
+  geom_errorbar(aes(ymin = ymin, ymax = ymax), width = 0) +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 2) +
+  geom_line(
+    data = expected_edge_windows,
+    aes(
+      x = window_mid,
+      y = expected_edge_starts,
+      color = expected_map,
+      group = expected_map
+    ),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    linewidth = 0.9
+  ) +
+  geom_point(
+    data = expected_edge_windows,
+    aes(
+      x = window_mid,
+      y = expected_edge_starts,
+      color = expected_map
+    ),
+    inherit.aes = FALSE,
+    shape = 95,
+    size = 5
+  ) +
+  scale_color_manual(values = c(edge_cols, expected_cols)) +
+  scale_y_log10(
+    limits = c(0.1, NA),
+    breaks = c(0.6, 6, 30),
+    labels = c("0.6", "6", "30")
+  ) +
+  labs(
+    x = "Genome position (bp)",
+    y = "Mean number of new edge starts, log10 scale",
+    color = "Case"
+  ) +
+  theme_bw()
+```
+
+## 7) Standard User Workflow
+
+This is the clean forward-recorder workflow without bridge validation,
+`recHistGen`, saved `tsSegGen`, or comparison helpers. It shows both standard
+entry points: start from `runMacsTS()` or start from existing msprime `.trees`
+files. In both cases, the user-facing process is:
+
+1. create founders,
+2. initialize `SimParam` and the forward TS recorder,
+3. run forward simulation,
+4. write final `.trees` files.
+
+```{r standard-forward-recorder-runmacts}
+out_dir <- 'testData'
+
+standard_runmacts_tree_paths <- local({
+  old_opts_standard <- options(
+    AlphaSimR.tsForwardAttachMetadata = TRUE,
+    AlphaSimR.tsForwardKeepSeg = FALSE,
+    AlphaSimR.tsForwardKeepRecHistGen = FALSE
+  )
+  on.exit(options(old_opts_standard), add = TRUE)
+
+  set.seed(42)
+
+  # 1. Create founders from runMacsTS.
+  standard_mac_out <- AlphaSimR:::runMacsTS(
+    nInd = 4,
+    nChr = 2,
+    segSites = c(60L, 120L),
+    inbred = FALSE,
+    ploidy = 2L,
+    species = "GENERIC",
+    mutationMode = "postTs",
+    usePhysicalPositions = TRUE,
+    nThreads = 1L,
+    returnTs = TRUE
+  )
+  standard_founder <- standard_mac_out$pop
+
+  # 2. Initialize AlphaSimR and the forward TS recorder.
+  standard_SP <- SimParam$new(standard_founder)
+  standard_SP$nThreads <- 1L
+  standard_SP$quadProb <- 0
+  standard_SP$setTrackPed(TRUE)
+
+  standard_base_pop <- newPop(standard_founder, simParam = standard_SP)
+  standard_SP$setTrackTs(TRUE, founderPop = standard_base_pop)
+
+  # 3. Run the forward simulation. The recorder updates TS tables during meiosis.
+  standard_pop <- standard_base_pop
+  n_forward_gen <- 2L
+  for (gen in seq_len(n_forward_gen)) {
+    standard_pop <- randCross(
+      pop = standard_pop,
+      nCrosses = 2L,
+      nProgeny = 5L,
+      simParam = standard_SP
+    )
+  }
+
+  # 4. Write final tree files.
+  standard_out_dir <- file.path(out_dir)
+  dir.create(standard_out_dir, recursive = TRUE, showWarnings = FALSE)
+  standard_original_paths <- AlphaSimR:::tsForwardFinalizeFromSimParam(
+    standard_SP,
+    out_dir = standard_out_dir,
+    out_basename = "standard_runMacsTS_forward_recorder",
+    clear = FALSE
+  )
+  standard_simplified_paths <- AlphaSimR:::tsForwardFinalizeFromSimParam(
+    standard_SP,
+    out_dir = standard_out_dir,
+    out_basename = "standard_runMacsTS_forward_recorder_simplified",
+    simplify = TRUE,
+    keep_unary = TRUE,
+    clear = TRUE
+  )
+  list(original = standard_original_paths, simplified = standard_simplified_paths)
+})
+
+standard_runmacts_tree_paths
+```
+
+```{r standard-forward-recorder-msprime}
+standard_msprime_tree_paths <- local({
+  old_opts_standard <- options(
+    AlphaSimR.tsForwardAttachMetadata = TRUE,
+    AlphaSimR.tsForwardKeepSeg = FALSE,
+    AlphaSimR.tsForwardKeepRecHistGen = FALSE
+  )
+  on.exit(options(old_opts_standard), add = TRUE)
+
+  set.seed(42)
+
+  # 1. Create founders from existing msprime tree files.
+  # The recombination map must be supplied with external tree-sequence files.
+  standard_L1 <- 1e6
+  standard_L2 <- 2e6
+  standard_msprime_chr_info <- list(
+    list(
+      ts_path = paste0(out_dir, "/msprime_chr0.trees"),
+      breaks = c(0, standard_L1 / 2, standard_L1),
+      rates = c(5e-5, 5e-6),
+      segSites = 60L
+    ),
+    list(
+      ts_path = paste0(out_dir, "/msprime_chr1.trees"),
+      breaks = c(0, standard_L2 / 3, 2 * standard_L2 / 3, standard_L2),
+      rates = c(5e-7, 5e-6, 5e-7),
+      segSites = 155L
+    )
+  )
+  stopifnot(all(file.exists(vapply(
+    standard_msprime_chr_info, `[[`, character(1), "ts_path"
+  ))))
+
+  standard_msprime_founder <- asMapPop(
+    chr_info = standard_msprime_chr_info,
+    inbred = FALSE,
+    ploidy = 2L
+  )
+
+  # 2. Initialize AlphaSimR and the forward TS recorder.
+  standard_msprime_SP <- SimParam$new(standard_msprime_founder)
+  standard_msprime_SP$nThreads <- 1L
+  standard_msprime_SP$quadProb <- 0
+  standard_msprime_SP$setTrackPed(TRUE)
+
+  standard_msprime_base_pop <- newPop(
+    standard_msprime_founder,
+    simParam = standard_msprime_SP
+  )
+  standard_msprime_SP$setTrackTs(TRUE, founderPop = standard_msprime_base_pop)
+
+  # 3. Run the forward simulation. The recorder updates TS tables during meiosis.
+  standard_msprime_pop <- standard_msprime_base_pop
+  n_forward_gen <- 2L
+  for (gen in seq_len(n_forward_gen)) {
+    standard_msprime_pop <- randCross(
+      pop = standard_msprime_pop,
+      nCrosses = 2L,
+      nProgeny = 5L,
+      simParam = standard_msprime_SP
+    )
+  }
+
+  # 4. Write final tree files.
+  standard_out_dir <- file.path(out_dir)
+  dir.create(standard_out_dir, recursive = TRUE, showWarnings = FALSE)
+  standard_msprime_original_paths <- AlphaSimR:::tsForwardFinalizeFromSimParam(
+    standard_msprime_SP,
+    out_dir = standard_out_dir,
+    out_basename = "standard_msprime_forward_recorder",
+    clear = FALSE
+  )
+  standard_msprime_simplified_paths <- AlphaSimR:::tsForwardFinalizeFromSimParam(
+    standard_msprime_SP,
+    out_dir = standard_out_dir,
+    out_basename = "standard_msprime_forward_recorder_simplified",
+    simplify = TRUE,
+    keep_unary = TRUE,
+    clear = TRUE
+  )
+  list(
+    original = standard_msprime_original_paths,
+    simplified = standard_msprime_simplified_paths
+  )
+})
+
+standard_msprime_tree_paths
+```

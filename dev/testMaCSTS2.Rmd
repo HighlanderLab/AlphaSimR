@@ -1,0 +1,330 @@
+---
+title: "test MaCSTS 2"
+output: html_document
+params:
+  nRep: 50
+  nChr: 1
+  inbred: false
+  ploidy: 2
+  nThreads: 1
+  usePhysicalPositions: true
+  Nref: 10000
+  baseSeed: 700000
+  outDir: "testData/out_phase1_useMacsMut_FALSE"
+  writeTrees: true
+  applyPostMut: true
+  mutSeedOffset: 0
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## General Notes
+As mentioned in `test MaCSTS 1`, when `useMacsMut = FALSE`, even ancestry (trees without mutation) from MaCSTS can differ from MaCS because of RNG state changes. So here, we can only focus on the comparison on distributions (e.g. tree height, numbers of mutations, nodes and edges). This notebook runs MaCSTS with `useMacsMut = FALSE` to generate ancestry-only tree sequences across multiple scenarios and replicates, then applies post-TS mutation separately. 
+
+## Goal Of This Notebook
+
+This notebook runs `MaCSTS(..., useMacsMut = FALSE)` across multiple scenarios,
+with multiple replicates per scenario. The mutation distributions and other statistics against legacy MaCS outputs will be compared, the CSV files record the seeds, paths and parameters for all runs; the .trees files will be output, enabling downstream analysis in Python/tskit to compare the distributions about trees and mutations, against msprime simulations.
+
+Output:
+
+1. `.trees` files per replicate/chromosome
+2. a minimal manifest (`CSV`) listing scenario/rep/chromosome/seed/path
+
+When `applyPostMut = TRUE`, it also applies post-TS mutation using
+`tsMutateTableCollection()` with mutation rate `dTheta = seqLen * (-t)` from args.
+
+## Configuration
+
+```{r}
+library(AlphaSimR)
+library(RcppTskit)
+
+# Safe param getter so chunks also run interactively (without rmarkdown::render).
+get_param <- function(name, default) {
+  if (exists("params", inherits = TRUE) &&
+      is.list(params) &&
+      !is.null(params[[name]])) {
+    return(params[[name]])
+  }
+  default
+}
+
+nRep <- as.integer(get_param("nRep", 50L))
+nChr <- as.integer(get_param("nChr", 1L))
+inbred <- isTRUE(get_param("inbred", FALSE))
+ploidy <- as.integer(get_param("ploidy", 2L))
+nThreads <- as.integer(get_param("nThreads", 1L))
+usePhysicalPositions <- isTRUE(get_param("usePhysicalPositions", TRUE))
+Nref <- as.numeric(get_param("Nref", 10000))
+baseSeed <- as.integer(get_param("baseSeed", 700000L))
+outDir <- as.character(get_param("outDir", "out_phase1_useMacsMut_FALSE"))
+writeTrees <- isTRUE(get_param("writeTrees", TRUE))
+applyPostMut <- isTRUE(get_param("applyPostMut", TRUE))
+mutSeedOffset <- as.integer(get_param("mutSeedOffset", 0L))
+
+if (nRep <= 0L) stop("nRep must be positive.")
+if (nChr <= 0L) stop("nChr must be positive.")
+if (ploidy <= 0L) stop("ploidy must be positive.")
+
+dir.create(outDir, recursive = TRUE, showWarnings = FALSE)
+```
+
+## Scenario Set
+
+```{r}
+# Keep scenarios connected in multi-pop cases (migration and/or join),
+# so runs always finish.
+scenarios <- list(
+  list(
+    id = 1L,
+    name = "single_const",
+    args = "8 100000 -t 1e-3 -r 1e-4 -s "
+  ),
+  list(
+    id = 2L,
+    name = "single_eN",
+    args = "8 100000 -t 1e-3 -r 1e-4 -eN 0.2 2.0 -eN 1.0 0.5 -s "
+  ),
+  list(
+    id = 3L,
+    name = "I2_migration",
+    args = "8 100000 -t 1e-3 -r 1e-4 -I 2 4 4 1e-2 -eM 0.5 5e-3 -ej 1.0 2 1 -s "
+  ),
+  # -I 2 4 4 1e-2: two populations, 4+4 sampled, with initial migration.
+  #-en 0.2 2 0.5: pop 2 becomes smaller at time 0.2.
+  #-ej 1.0 2 1: at time 1.0, pop 2 joins pop 1 backward (equivalent to a forward split).
+  list(
+    id = 4L,
+    name = "I2_en_join",
+    args = "8 100000 -t 1e-3 -r 1e-4 -I 2 4 4 1e-2 -en 0.2 2 0.5 -ej 1.0 2 1 -s "
+  )
+)
+
+scenario_df <- do.call(
+  rbind,
+  lapply(scenarios, function(s) data.frame(id = s$id, name = s$name, args = s$args))
+)
+scenario_df
+```
+
+## Helpers
+
+```{r}
+make_seed_vec <- function(scenario_id, rep_id, nChr, baseSeed) {
+  # Deterministic integer seed vector, one seed per chromosome.
+  as.integer(baseSeed + scenario_id * 100000L + rep_id * 1000L + seq_len(nChr) - 1L)
+}
+
+parse_dTheta <- function(args) {
+  tok <- strsplit(as.character(args), "[,[:space:]]+", perl = TRUE)[[1L]]
+  tok <- tok[nzchar(tok)]
+  if (length(tok) < 2L) stop("args must include sample size and sequence length.")
+  seqLen <- as.numeric(tok[2L])
+  if (!is.finite(seqLen) || seqLen <= 0) stop("Invalid sequence length in args.")
+  i_t <- match("-t", tok)
+  if (is.na(i_t) || i_t >= length(tok)) return(0)
+  tval <- as.numeric(tok[i_t + 1L])
+  if (!is.finite(tval) || tval < 0) stop("Invalid -t value in args.")
+  seqLen * tval
+}
+
+run_one <- function(sc, rep_id) {
+  seed_vec <- make_seed_vec(sc$id, rep_id, nChr, baseSeed)
+  dTheta <- parse_dTheta(sc$args)
+  mut_seed_vec <- as.integer(seed_vec + mutSeedOffset)
+
+  out <- AlphaSimR:::MaCSTS(
+    args = sc$args,
+    nChr = nChr,
+    inbred = inbred,
+    ploidy = ploidy,
+    nThreads = nThreads,
+    seed = seed_vec,
+    usePhysicalPositions = usePhysicalPositions,
+    useMacsMut = FALSE,
+    Nref = Nref
+  )
+  timeScale <- as.numeric(out$timeScale)
+  if (!is.finite(timeScale) || timeScale <= 0) {
+    stop("Invalid timeScale returned by MaCSTS.")
+  }
+  # MaCS dTheta is in coalescent-time units.
+  # If MaCSTS times were rescaled (e.g., to generations), adjust theta accordingly.
+  dTheta_post <- dTheta / timeScale
+  # Legacy MaCS run with identical args/seeds for mutation-count reference.
+  macs <- AlphaSimR:::MaCS(
+    args = sc$args,
+    maxSites = rep(0L, nChr),
+    inbred = inbred,
+    ploidy = ploidy,
+    nThreads = nThreads,
+    seed = seed_vec
+  )
+
+  rows <- vector("list", nChr)
+  for (chr in seq_len(nChr)) {
+    tc_xptr <- out$tables[[chr]]
+    if (applyPostMut && dTheta_post > 0) {
+      AlphaSimR:::tsMutateTableCollection(tc_xptr, dTheta_post, as.numeric(mut_seed_vec[chr]))
+    }
+    tc <- RcppTskit::TableCollection$new(xptr = tc_xptr)
+    ts <- tc$tree_sequence()
+    tc_summary <- AlphaSimR:::rtsk_table_collection_summary2(tc_xptr)
+
+    tree_path <- NA_character_
+    if (writeTrees) {
+      tree_path <- file.path(
+        outDir,
+        sprintf("%s_rep%02d_chr%02d.trees", sc$name, rep_id, chr)
+      )
+      ts$write(tree_path)
+    }
+
+    rows[[chr]] <- data.frame(
+      scenario_id = sc$id,
+      scenario = sc$name,
+      rep = rep_id,
+      chr = chr,
+      args = sc$args,
+      seed_chr = seed_vec[chr],
+      mut_seed_chr = mut_seed_vec[chr],
+      dTheta = dTheta,
+      dTheta_post = dTheta_post,
+      usePhysicalPositions = usePhysicalPositions,
+      Nref = Nref,
+      macs_num_mutations = as.numeric(length(macs$genMap[[chr]])),
+      macsts_num_mutations = as.numeric(tc_summary$num_mutations),
+      tree_path = tree_path,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  do.call(rbind, rows)
+}
+```
+
+## Run Replicates
+
+```{r}
+manifest_rows <- vector("list", length(scenarios) * nRep)
+status_rows <- vector("list", length(scenarios) * nRep)
+k <- 0L
+
+for (sc in scenarios) {
+  for (rep_id in seq_len(nRep)) {
+    k <- k + 1L
+    run_label <- sprintf("%s rep%02d", sc$name, rep_id)
+    cat("Running:", run_label, "\n")
+
+    err_msg <- NA_character_
+    one <- tryCatch(
+      run_one(sc, rep_id),
+      error = function(e) {
+        err_msg <<- conditionMessage(e)
+        NULL
+      }
+    )
+
+    manifest_rows[[k]] <- one
+    status_rows[[k]] <- data.frame(
+      scenario_id = sc$id,
+      scenario = sc$name,
+      rep = rep_id,
+      success = !is.null(one),
+      error = ifelse(is.na(err_msg), "", err_msg),
+      stringsAsFactors = FALSE
+    )
+  }
+}
+
+manifest_df <- do.call(rbind, Filter(Negate(is.null), manifest_rows))
+if (is.null(manifest_df)) manifest_df <- data.frame()
+run_status_df <- do.call(rbind, status_rows)
+
+run_status_df
+```
+
+## Mutation Count Check (MaCS vs MaCSTS ancestry-only)
+
+Per-replicate mutation counts are not expected to be identical because legacy MaCS mutates during local-tree simulation, while post-TS mutates on the recorded edge tables with its own RNG stream. However, the mutation count distributions should be similar, and the mean difference should be small relative to the mean mutation count. The `mut_stats` table summarizes these comparisons per scenario.
+
+```{r}
+if (nrow(manifest_df) == 0L) {
+  stop("No successful runs. Check run_status_df$error.")
+}
+
+mut_stats <- do.call(
+  rbind,
+  lapply(split(manifest_df, manifest_df$scenario), function(d) {
+    delta <- d$macs_num_mutations - d$macsts_num_mutations
+
+    sd_macs   <- sd(d$macs_num_mutations, na.rm = TRUE)
+    sd_macsts <- sd(d$macsts_num_mutations, na.rm = TRUE)
+    sd_delta  <- sd(delta, na.rm = TRUE)
+
+    data.frame(
+      scenario        = d$scenario[1],
+      n               = nrow(d),
+      macs_mut_mean   = mean(d$macs_num_mutations, na.rm = TRUE),
+      macs_mut_sd     = sd_macs,
+      macsts_mut_mean = mean(d$macsts_num_mutations, na.rm = TRUE),
+      macsts_mut_sd   = sd_macsts,
+      mut_diff_mean   = mean(delta, na.rm = TRUE),
+      mut_diff_sd     = sd_delta,
+      rel_diff        = mean(delta, na.rm = TRUE) /
+                          mean(d$macs_num_mutations, na.rm = TRUE),
+      stringsAsFactors = FALSE
+    )
+  })
+)
+mut_stats
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+plot_df <- mut_stats %>%
+    select(scenario, macs_mut_mean, macs_mut_sd, macsts_mut_mean, macsts_mut_sd) %>%
+    pivot_longer(
+        cols = -scenario,
+        names_to = c("method", ".value"),
+        names_pattern = "(macs|macsts)_mut_(mean|sd)"
+    ) %>%
+    mutate(method = recode(method, macs = "MaCS", macsts = "MaCSTS"))
+
+ggplot(plot_df, aes(x = scenario, y = mean, fill = method)) +
+    geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+    geom_errorbar(
+        aes(ymin = mean - sd, ymax = mean + sd),
+        position = position_dodge(width = 0.8),
+        width = 0.2
+    ) +
+    labs(x = "Scenario", y = "Mean # mutations", fill = "Method") +
+    theme_bw()
+```
+
+
+## Save Outputs
+
+```{r}
+manifest_csv_path <- file.path(outDir, "phase1_macsTS_useMacsMut_FALSE_manifest.csv")
+status_csv_path <- file.path(outDir, "phase1_macsTS_useMacsMut_FALSE_run_status.csv")
+
+write.csv(manifest_df, manifest_csv_path, row.names = FALSE)
+write.csv(run_status_df, status_csv_path, row.names = FALSE)
+
+cat("Saved manifest CSV:", manifest_csv_path, "\n")
+cat("Saved run status CSV:", status_csv_path, "\n")
+if (writeTrees) {
+  cat("Saved .trees files under:", outDir, "\n")
+}
+```
+
+## Next Step
+
+Convert the parameters and use them to run simulations with msprime.
+Then we can compare the distributions on number of trees, edges, nodes, mutations and tree heights.

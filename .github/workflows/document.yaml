@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::roxygen2
+          extra-packages: github::LynxJinyangii/RcppTskit/RcppTskit@add-multiple-functions-on-pr-131, any::roxygen2
           needs: roxygen2
 
       - name: Document

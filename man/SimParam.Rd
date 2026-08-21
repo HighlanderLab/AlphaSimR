@@ -403,6 +403,10 @@ genetic map}
 
     \item{\code{recHist}}{list of historic recombination events}
 
+    \item{\code{isTrackRecGen}}{is genetic-coordinate recombination being tracked.}
+
+    \item{\code{recHistGen}}{list of historic genetic-coordinate recombination events.}
+
     \item{\code{haplotypes}}{list of computed IBD haplotypes}
 
     \item{\code{varA}}{additive genetic variance in founderPop}
@@ -426,6 +430,8 @@ relative to all active QTL}
     \item \href{#method-SimParam-initialize}{\code{SimParam$new()}}
     \item \href{#method-SimParam-setTrackPed}{\code{SimParam$setTrackPed()}}
     \item \href{#method-SimParam-setTrackRec}{\code{SimParam$setTrackRec()}}
+    \item \href{#method-SimParam-setTrackRecGen}{\code{SimParam$setTrackRecGen()}}
+    \item \href{#method-SimParam-setTrackTs}{\code{SimParam$setTrackTs()}}
     \item \href{#method-SimParam-resetPed}{\code{SimParam$resetPed()}}
     \item \href{#method-SimParam-restrSegSites}{\code{SimParam$restrSegSites()}}
     \item \href{#method-SimParam-setSexes}{\code{SimParam$setSexes()}}
@@ -566,6 +572,51 @@ founderPop = quickHaplo(nInd=10, nChr=1, segSites=10)
 SP = SimParam$new(founderPop)
 SP$setTrackRec(TRUE)
 }
+    \if{html}{\out{</div>}}
+  }
+}
+
+\if{html}{\out{<hr>}}
+\if{html}{\out{<a id="method-SimParam-setTrackRecGen"></a>}}
+\if{latex}{\out{\hypertarget{method-SimParam-setTrackRecGen}{}}}
+\subsection{\code{SimParam$setTrackRecGen()}}{
+  Sets genetic-coordinate recombination tracking for the simulation.
+By default this is turned off. When turned on, it will also turn on pedigree tracking.
+  \subsection{Usage}{
+    \if{html}{\out{<div class="r">}}
+    \preformatted{SimParam$setTrackRecGen(isTrackRecGen, force = FALSE)}
+    \if{html}{\out{</div>}}
+  }
+  \subsection{Arguments}{
+    \if{html}{\out{<div class="arguments">}}
+    \describe{
+      \item{\code{isTrackRecGen}}{should genetic-coordinate recombination tracking be on.}
+      \item{\code{force}}{should the check for a running simulation be ignored.}
+    }
+    \if{html}{\out{</div>}}
+  }
+}
+
+\if{html}{\out{<hr>}}
+\if{html}{\out{<a id="method-SimParam-setTrackTs"></a>}}
+\if{latex}{\out{\hypertarget{method-SimParam-setTrackTs}{}}}
+\subsection{\code{SimParam$setTrackTs()}}{
+  Sets forward tree-sequence tracking on/off.
+When enabled, this also enables genetic-coordinate recombination
+tracking and can initialize the forward TS recorder immediately.
+  \subsection{Usage}{
+    \if{html}{\out{<div class="r">}}
+    \preformatted{SimParam$setTrackTs(isTrackTs, founderPop = NULL, force = FALSE)}
+    \if{html}{\out{</div>}}
+  }
+  \subsection{Arguments}{
+    \if{html}{\out{<div class="arguments">}}
+    \describe{
+      \item{\code{isTrackTs}}{should forward tree-sequence tracking be on.}
+      \item{\code{founderPop}}{founder/sample population used to seed TS node maps.
+Required on enable if no recorder is already attached.}
+      \item{\code{force}}{should the check for a running simulation be ignored.}
+    }
     \if{html}{\out{</div>}}
   }
 }
@@ -1807,7 +1858,16 @@ be metacentric.}
   For internal use only.
   \subsection{Usage}{
     \if{html}{\out{<div class="r">}}
-    \preformatted{SimParam$addToRec(lastId, id, mother, father, isDH, hist, ploidy)}
+    \preformatted{SimParam$addToRec(
+  lastId,
+  id,
+  mother,
+  father,
+  isDH,
+  hist,
+  histGen = NULL,
+  ploidy
+)}
     \if{html}{\out{</div>}}
   }
   \subsection{Arguments}{
@@ -1819,6 +1879,7 @@ be metacentric.}
       \item{\code{father}}{vector of father iids}
       \item{\code{isDH}}{indicator for DH lines}
       \item{\code{hist}}{new recombination history}
+      \item{\code{histGen}}{new recombination history (genetic coordinate)}
       \item{\code{ploidy}}{ploidy level}
     }
     \if{html}{\out{</div>}}

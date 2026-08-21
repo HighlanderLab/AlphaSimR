@@ -3,6 +3,8 @@
 #include <set>
 #include <list>
 #include <queue>
+#include <memory>
+#include <unordered_map>
 //#include<stack>
 #include <boost/weak_ptr.hpp>
 #include <boost/shared_ptr.hpp>
@@ -10,6 +12,7 @@
 #include <boost/random/mersenne_twister.hpp>
 #include <boost/random/uniform_01.hpp>
 #include "constants.h"
+#include "tskit.h"
 
 using namespace std;
 
@@ -478,6 +481,40 @@ public:
   bool bPrintOutput;
 };
 
+enum class TsPositionMode {MACS_UNIT, PHYSICAL_BP};
+
+class TsRecorder {
+public:
+  TsRecorder(double seqLengthBp, TsPositionMode positionMode,
+             bool inbred, unsigned int ploidy);
+  ~TsRecorder();
+  void preRegisterSamples(NodePtr * pSampleNodes, unsigned int nSamples);
+  void recordTreeInterval(const EdgePtrVector & treeEdges,
+                          unsigned int iTotalTreeEdges,
+                          double leftPosUnit, double rightPosUnit);
+  void recordMutation(double mutationPosUnit, EdgePtr & selectedEdge,
+                      double mutationTime);
+  void simplify();
+  tsk_table_collection_t * release(double timeScale = 1.0,
+                                   bool expandInbred = true);
+  
+private:
+  tsk_table_collection_t * pTables;
+  TsPositionMode positionMode;
+  double dSequenceLengthBp;
+  bool bSamplesPreRegistered;
+  bool bSimplified;
+  bool bInbred;
+  unsigned int iPloidy;
+  std::vector<tsk_id_t> sampleNodeIds;
+  std::unordered_map<unsigned long long, tsk_id_t> nodeIdMap;
+  std::unordered_map<unsigned long long, tsk_id_t> sampleNodeIndividualMap;
+  void expandInbredSamples();
+  double toTsPosition(double posUnit) const;
+  tsk_id_t ensurePopulation(short int population);
+  tsk_id_t getOrCreateNode(NodePtr & node);
+};
+
 // Configuration container populated by parameter reading procedure
 // can be used by any simulator implementation
 class Configuration
@@ -531,9 +568,13 @@ public:
   // The entry point for building the graph while traversing the
   // the chromosome on the unit interval.
   void build();
+  void buildTs(bool usePhysicalPositions = false, bool useMacsMut = false,
+               bool inbred = false, unsigned int ploidy = 2);
   // Print the haplotypes in MS format
   void printHaplotypes();
   vector<AlphaSimRReturn> getMutations();
+  tsk_table_collection_t * releaseTableCollectionTs(double timeScale = 1.0,
+                                                    bool expandInbred = true);
   
 private:
   // The random number generator
@@ -618,6 +659,7 @@ private:
   bool bBeginGeneConversion;
   // flag to close a pending gene conversion event
   bool bEndGeneConversion;
+  std::unique_ptr<TsRecorder> pTsRecorder;
   // if gene conversion is to be closed at this iteration use the following
   // two saved edges
   EdgePtr gcOldEdge,gcNewEdge;
@@ -655,6 +697,7 @@ private:
   // Add a mutation uniformly to the local tree, allowing it to trickle down
   // to the sampled chromosomes
   void addMutations(double startPos,double endPos);
+  void addMutationsTs(double startPos,double endPos);
   // Uniform randomly selects an edge (and position) to insert a xover or mutation node into
   EdgePtr getRandomEdgeOnTree(double & dSplitPoint,double dRandSpot);
   // Once a coalescent height is determined, uniform randomly select an
@@ -743,6 +786,12 @@ public:
   // case, constructs a new graphbuilder and calls the build() function
   void beginSimulation();
   vector<AlphaSimRReturn> beginSimulationMemory();
+  tsk_table_collection_t * beginSimulationTs(bool usePhysicalPositions = false,
+                                             bool useMacsMut = false,
+                                             double timeScale = 1.0,
+                                             bool inbred = false,
+                                             unsigned int ploidy = 2,
+                                             bool expandInbred = true);
   Simulator();
   ~Simulator(); //destructor
   

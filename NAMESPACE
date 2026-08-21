@@ -14,6 +14,7 @@ export(aa)
 export(addSegSite)
 export(asCategorical)
 export(asLogNormal)
+export(asMapPop)
 export(asPoisson)
 export(attrition)
 export(bv)
@@ -41,6 +42,7 @@ export(hybridCross)
 export(importGenMap)
 export(importHaplo)
 export(importInbredGeno)
+export(importVCF)
 export(isFemale)
 export(isHybridPop)
 export(isMale)
@@ -89,6 +91,7 @@ export(rtsk_table_collection_summary2)
 export(rtsk_treeseq_get_num_individuals2)
 export(runMacs)
 export(runMacs2)
+export(runMacsTS)
 export(sampleHaplo)
 export(selIndex)
 export(selInt)
@@ -104,6 +107,8 @@ export(setMarkerHaplo)
 export(setPheno)
 export(setPhenoGCA)
 export(setPhenoProgTest)
+export(simAnc)
+export(simMut)
 export(smithHazel)
 export(solveMKM)
 export(solveMVM)
@@ -114,6 +119,9 @@ export(solveRRBLUP_EM)
 export(solveRRBLUP_EM2)
 export(solveRRBLUP_EM3)
 export(solveUVM)
+export(tsForwardFinalizeFromSimParam)
+export(tsForwardHasRecorder)
+export(tsForwardWriteTreesFromSimParam)
 export(unnameMultiPop)
 export(usefulness)
 export(varA)
@@ -146,31 +154,37 @@ import(Rcpp)
 import(RcppTskit)
 importFrom(R6,R6Class)
 importFrom(Rdpack,reprompt)
-importFrom(methods,.hasSlot)
-importFrom(methods,classLabel)
-importFrom(methods,is)
-importFrom(methods,new)
-importFrom(methods,show)
-importFrom(methods,slot)
-importFrom(methods,validObject)
-importFrom(stats,aggregate)
-importFrom(stats,coef)
-importFrom(stats,cov2cor)
-importFrom(stats,dnorm)
-importFrom(stats,lm)
-importFrom(stats,model.matrix)
-importFrom(stats,na.omit)
-importFrom(stats,pnorm)
-importFrom(stats,qgamma)
-importFrom(stats,qnorm)
-importFrom(stats,rbinom)
-importFrom(stats,rnorm)
-importFrom(stats,rpois)
-importFrom(stats,runif)
-importFrom(stats,setNames)
-importFrom(stats,var)
-importFrom(utils,combn)
-importFrom(utils,packageDescription)
-importFrom(utils,read.table)
-importFrom(utils,write.table)
+importFrom(methods,
+  .hasSlot,
+  classLabel,
+  is,
+  new,
+  show,
+  slot,
+  validObject
+)
+importFrom(stats,
+  aggregate,
+  coef,
+  cov2cor,
+  dnorm,
+  lm,
+  model.matrix,
+  na.omit,
+  pnorm,
+  qgamma,
+  qnorm,
+  rbinom,
+  rnorm,
+  rpois,
+  runif,
+  setNames,
+  var
+)
+importFrom(utils,
+  combn,
+  packageDescription,
+  read.table,
+  write.table
+)
 useDynLib(AlphaSimR, .registration = TRUE)

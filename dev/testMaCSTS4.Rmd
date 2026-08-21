@@ -1,0 +1,367 @@
+---
+title: "test MaCSTS 4: wrapper/staged workflow overview"
+output: html_document
+date: "2026-06-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## General Notes
+
+This notebook summarizes the current TS workflow design and parameter effects,
+based on `testMaCSTS1.Rmd`, `testMaCSTS2.Rmd`, and `testMaCSTS3.Rmd`.
+
+It starts from the two supported ways to run:
+
+1. high-level wrapper: `runMacsTS(...)`
+2. staged low-level path (for developers and advanced users): `simAnc(...) -> simMut(...) -> finalizeInbredTs(...) -> asMapPop(...)`
+
+## 1) Two Ways To Run
+
+### A. High-level wrapper (`runMacsTS`)
+
+`runMacsTS` is the default user-facing entry point. It is designed to feel like
+`runMacs/runMacs2` but with TS-aware internals and mode control.
+
+- Builds MaCS command from species/manual inputs
+- Runs ancestry and mutation according to `mutationMode`
+- Converts to `MapPop` (including optional `segSites` sampling)
+- Optionally returns TS tables/metadata
+
+### B. Staged workflow (`simAnc` + `simMut` + ...)
+
+This path is for development/debugging and explicit control over each stage.
+
+- `simAnc`: ancestry-only TS from MaCS engine (`useMacsMut=FALSE`)
+- `simMut`: post-TS mutation placement on edge table (if `mutationMode="postTs"`)
+- `finalizeInbredTs`: optional inbred leaf expansion in TS (if `inbred=TRUE` and `ploidy>1`)
+- `asMapPop`: convert TS to `MapPop` (sampling/filtering + map construction)
+
+## 2) Function Relationship
+
+```{r relationship-diagram, results='asis'}
+cat("
+runMacsTS()
+  ├─ command builder (species/manual)
+  ├─ mutationMode = 'macs'  -> MaCSTS(..., useMacsMut=TRUE, expandInbredSamples=FALSE)
+  ├─ mutationMode = 'postTs'-> simAnc(...) -> simMut(...)
+  ├─ mutationMode = 'none'  -> simAnc(...) only (TS-only unless user mutates later)
+  ├─ optional finalizeInbredTs(...)
+  └─ asMapPop(...) -> MapPop
+
+Lower layers:
+  simAnc()  -> MaCSTS(... useMacsMut=FALSE ...)
+  simMut()  -> tsMutateTableCollection(...) per chromosome
+  finalizeInbredTs() -> tsFinalizeInbredTableCollection(...) per chromosome
+  MaCSTS()  -> C++ simulator + TS recorder
+")
+```
+
+## 3) Core Parameters And Their Effects
+
+```{r param-table}
+param_effects <- data.frame(
+  parameter = c(
+    "mutationMode",
+    "useMacsMut (MaCSTS)",
+    "usePhysicalPositions",
+    "Nref",
+    "segSites",
+    "inbred + ploidy",
+    "expandInbredTs",
+    "seed",
+    "mutSeed",
+    "nThreads"
+  ),
+  where_used = c(
+    "runMacsTS",
+    "MaCSTS",
+    "MaCSTS/asMapPop",
+    "MaCSTS (timeScale)",
+    "asMapPop",
+    "MaCSTS/asMapPop/finalizeInbredTs",
+    "runMacsTS/finalizeInbredTs",
+    "simAnc/MaCSTS ancestry RNG",
+    "simMut post-TS RNG",
+    "MaCS chromosomes + asMapPop worker"
+  ),
+  main_effect = c(
+    "Selects mutation path: macs vs postTs vs none",
+    "Adds MaCS-style mutation during ancestry if TRUE",
+    "TS coordinates in bp (TRUE) or [0,1] (FALSE)",
+    "Rescales node/mutation times; sets time_units to generations",
+    "Caps number of retained variants per chromosome in conversion",
+    "Controls sample interpretation and output haplotype structure",
+    "If TRUE with inbred/ploidy>1, duplicates TS sample leaves",
+    "Determines ancestry reproducibility",
+    "Determines post-TS mutation reproducibility",
+    "Parallelism level when available"
+  ),
+  stringsAsFactors = FALSE
+)
+knitr::kable(param_effects)
+```
+
+## Helpers to Compare Two Ways To Run
+
+```{r comparison-helpers}
+tc_counts <- function(tc_xptr) {
+  tc <- RcppTskit::TableCollection$new(xptr = tc_xptr)
+  data.frame(
+    num_nodes = as.integer(tc$num_nodes()),
+    num_edges = as.integer(tc$num_edges()),
+    num_sites = as.integer(tc$num_sites()),
+    num_mutations = as.integer(tc$num_mutations())
+  )
+}
+
+collect_ts_counts <- function(tables, method) {
+  do.call(rbind, lapply(seq_along(tables), function(chr) {
+    cbind(chr = chr, method = method, tc_counts(tables[[chr]]))
+  }))
+}
+
+compare_wrapper_vs_staged <- function(out, staged) {
+  if (!requireNamespace("RcppTskit", quietly = TRUE)) {
+    stop("RcppTskit is required for TS checks.")
+  }
+  if (is.null(out$pop) || is.null(out$tables)) {
+    stop("out must contain both $pop and $tables")
+  }
+  if (is.null(staged$pop) || is.null(staged$tables)) {
+    stop("staged must contain both $pop and $tables")
+  }
+  
+  ts_counts_wrap <- collect_ts_counts(out$tables, method = "wrapper")
+  ts_counts_stage <- collect_ts_counts(staged$tables, method = "staged")
+  ts_counts <- rbind(ts_counts_wrap, ts_counts_stage)
+  
+  nChr <- length(out$pop@geno)
+  same_geno <- vapply(seq_len(nChr), function(chr) {
+    identical(out$pop@geno[[chr]], staged$pop@geno[[chr]])
+  }, logical(1))
+  same_genMap <- vapply(seq_len(nChr), function(chr) {
+    isTRUE(all.equal(out$pop@genMap[[chr]], staged$pop@genMap[[chr]], tolerance = 0))
+  }, logical(1))
+  same_ts_counts <- identical(
+    ts_counts_wrap[, c("num_nodes", "num_edges", "num_sites", "num_mutations")],
+    ts_counts_stage[, c("num_nodes", "num_edges", "num_sites", "num_mutations")]
+  )
+  
+  checks <- data.frame(
+    metric = c("nLoci", "geno_all_chr", "genMap_all_chr", "ts_table_counts"),
+    equal = c(
+      identical(out$pop@nLoci, staged$pop@nLoci),
+      all(same_geno),
+      all(same_genMap),
+      same_ts_counts
+    ),
+    stringsAsFactors = FALSE
+  )
+  
+  list(ts_counts = ts_counts, checks = checks)
+}
+
+print_wrapper_vs_staged <- function(cmp) {
+  print(cmp$ts_counts)
+  print(cmp$checks)
+  invisible(cmp)
+}
+```
+
+## Minimal Usage Examples
+
+### A. High-level wrapper mode
+
+```{r ex-runMacsTS}
+library(AlphaSimR)
+devtools::load_all()
+set.seed(1)
+out <- AlphaSimR:::runMacsTS(
+  nInd = 4,
+  nChr = 2,
+  segSites = 60,
+  inbred = FALSE,
+  ploidy = 2L,
+  species = "GENERIC",
+  mutationMode = "postTs",      # or "macs" / "none"
+  usePhysicalPositions = FALSE,
+  nThreads = 1L,
+  returnTs = TRUE
+)
+
+# runMacsTS returns:
+# out$pop      -> MapPop
+# out$tables   -> TS table collections (if returnTs=TRUE)
+```
+
+### B. Staged mode
+
+```{r ex-staged}
+library(AlphaSimR)
+
+# use the same args and seeds as high-level wrapper mode
+args <- out$args
+nChr <- 2L
+seed_chr <- out$seed
+
+anc <- AlphaSimR:::simAnc(
+  args = args,
+  nChr = nChr,
+  inbred = FALSE,
+  ploidy = 2L,
+  nThreads = 1L,
+  seed = seed_chr,
+  usePhysicalPositions = FALSE,
+  Nref = NA_real_
+)
+
+mut <- AlphaSimR:::simMut(anc)  # uses anc$dTheta and derived mutation seeds by default
+
+# Optional for inbred/ploidy expansion in TS:
+# mut <- AlphaSimR:::finalizeInbredTs(mut, inbred = TRUE, ploidy = 2L)
+
+pop <- AlphaSimR:::asMapPop(
+  chr_info = list(
+    tables = mut$tables,
+    breaks = list(c(0, 1)),
+    rates = list(c(1))
+  ),
+  ploidy = 2L,
+  inbred = FALSE,
+  segSites = 60
+)
+```
+
+## Validation
+
+### Wrapper vs staged equivalence
+
+```{r wrapper-vs-staged-equivalence}
+# Reuse objects from the previous ection:
+# - out  : runMacsTS(...) result
+# - mut  : simMut(...) result from staged path
+# - pop  : asMapPop(...) result from staged path
+
+stopifnot(exists("out"), exists("mut"), exists("pop"))
+cmp <- compare_wrapper_vs_staged(
+  out = out,
+  staged = list(
+    tables = mut$tables,
+    pop = pop
+  )
+)
+print_wrapper_vs_staged(cmp)
+```
+
+### Wrapper vs staged (inbred=TRUE, ploidy>1)
+
+```{r wrapper-vs-staged-inbred}
+# Example: inbred TRUE with ploidy 2
+set.seed(1)
+out_inbred <- AlphaSimR:::runMacsTS(
+  nInd = 4,
+  nChr = 2,
+  segSites = 60,
+  inbred = TRUE,
+  ploidy = 2L,
+  species = "GENERIC",
+  mutationMode = "postTs",
+  usePhysicalPositions = TRUE,
+  expandInbredTs = TRUE,
+  nThreads = 1L,
+  returnTs = TRUE,
+  Nref = 10000
+)
+
+anc_inbred <- AlphaSimR:::simAnc(
+  args = out_inbred$args,
+  nChr = 2L,
+  inbred = TRUE,
+  ploidy = 2L,
+  nThreads = 1L,
+  seed = out_inbred$seed,
+  usePhysicalPositions = TRUE,
+  #Nref = NA_real_,
+  Nref = 10000
+)
+mut_inbred <- AlphaSimR:::simMut(anc_inbred)
+fin_inbred <- AlphaSimR:::finalizeInbredTs(mut_inbred, inbred = TRUE, ploidy = 2L)
+
+pop_inbred <- AlphaSimR:::asMapPop(
+  chr_info = list(
+    tables = fin_inbred$tables,
+    breaks = rep(list(c(0, 1)), 2L),
+    rates = rep(list(c(1)), 2L)
+  ),
+  ploidy = 2L,
+  inbred = TRUE,
+  segSites = 60,
+  site_sampling_seed = 42L,
+  nThreads = 1L
+)
+
+cmp_inbred <- compare_wrapper_vs_staged(
+  out = out_inbred,
+  staged = list(
+    tables = fin_inbred$tables,
+    pop = pop_inbred
+  )
+)
+print_wrapper_vs_staged(cmp_inbred)
+```
+
+Output a ts as an example and check it in Python:
+```{r export-inbred-ts}
+tables_src <- if (exists("fin_inbred")) {
+  fin_inbred$tables
+} else if (exists("out_inbred")) {
+  out_inbred$tables
+} else {
+  stop("Need fin_inbred or out_inbred in environment. Run chunk 5.1b first.")
+}
+# chr1
+tc_xptr <- tables_src[[1]]
+tc <- RcppTskit::TableCollection$new(xptr = tc_xptr)
+ts <- tc$tree_sequence()
+ts$write('testData/inbred_test.trees')
+```
+
+```{r py-setup}
+library(reticulate)
+# Use your own path here!
+use_python('/usr/bin/python3', required = TRUE)
+```
+
+
+```{python}
+import numpy as np
+import tskit
+ts_inbred = tskit.load('testData/inbred_test.trees')
+ts_inbred.samples()
+
+print(ts_inbred.first().draw_text())
+from IPython.display import display
+svg_size = (800, 250)
+svg_string = ts_inbred.first().draw_svg(
+    size=svg_size, time_scale="rank", omit_sites=True,
+    y_axis=True, y_label=" "  # optional: show a time scale on the left
+)
+with open("tmp_tree.svg", "w") as f:
+    f.write(svg_string)
+print(ts_inbred.tables.nodes[2612:2620])
+print(ts_inbred.tables.nodes[0:4])
+
+g_matrix = ts_inbred.genotype_matrix()
+for hap in range(0, len(g_matrix[0]), 2):
+    print(hap, hap+1)
+    print(np.array_equal(g_matrix[:, hap], g_matrix[:, hap+1]))
+
+```
+Sampled nodes are duplicated as expected for inbred/ploidy expansion, from nodes 0-3. Each pair of hap (from the same individual) have same alleles.
+
+
+### Parameter sensitivity checks
+In tests/testthat/test-runMacsTS-sensitivity.R

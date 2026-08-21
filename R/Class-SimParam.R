@@ -111,6 +111,8 @@ SimParam = R6Class(
       private$.pedigree = matrix(NA_integer_,nrow=0,ncol=3)
       private$.isTrackRec = FALSE
       private$.recHist = list()
+      private$.isTrackRecGen = FALSE
+      private$.recHistGen = list()
       private$.varA = numeric()
       private$.varG = numeric()
       private$.varE = numeric()
@@ -187,6 +189,51 @@ SimParam = R6Class(
       invisible(self)
     },
 
+    #' @description Sets genetic-coordinate recombination tracking for the simulation.
+    #' By default this is turned off. When turned on, it will also turn on pedigree tracking.
+    #'
+    #' @param isTrackRecGen should genetic-coordinate recombination tracking be on.
+    #' @param force should the check for a running simulation be ignored.
+    setTrackRecGen = function(isTrackRecGen, force=FALSE){
+      stopifnot(is.logical(isTrackRecGen))
+      if(!force){
+        private$.isRunning()
+      }
+      private$.isTrackRecGen = isTrackRecGen
+      if(isTrackRecGen){
+        private$.isTrackPed = TRUE
+        private$.isTrackRec = TRUE
+      }
+      invisible(self)
+    },
+
+    #' @description Sets forward tree-sequence tracking on/off.
+    #' When enabled, this also enables genetic-coordinate recombination
+    #' tracking and can initialize the forward TS recorder immediately.
+    #'
+    #' @param isTrackTs should forward tree-sequence tracking be on.
+    #' @param founderPop founder/sample population used to seed TS node maps.
+    #' Required on enable if no recorder is already attached.
+    #' @param force should the check for a running simulation be ignored.
+    setTrackTs = function(isTrackTs, founderPop=NULL, force=FALSE){
+      stopifnot(is.logical(isTrackTs), length(isTrackTs)==1L, !is.na(isTrackTs))
+      if(isTRUE(isTrackTs)){
+        self$setTrackRecGen(TRUE, force=TRUE)
+        hasRecorder = !is.null(.tsForwardGetRecorder(self))
+        if(is.null(founderPop)){
+          if(!hasRecorder){
+            stop("setTrackTs(TRUE) requires founderPop when no recorder is attached", call. = FALSE)
+          }
+        } else {
+          tsForwardInitOnSimParam(self, founderPop=founderPop)
+        }
+      }else{
+        .tsForwardSetRecorder(self, NULL)
+      }
+      invisible(self)
+    },
+
+
     #' @description Resets the internal lastId, the pedigree
     #' and recombination tracking (if in use) to the
     #' supplied lastId. Be careful using this function because
@@ -216,6 +263,9 @@ SimParam = R6Class(
       private$.pedigree = private$.pedigree[0:lastId,,drop=FALSE]
       if(private$.isTrackRec){
         private$.recHist = private$.recHist[0:lastId]
+      }
+      if(private$.isTrackRecGen){
+        private$.recHistGen = private$.recHistGen[0:lastId]
       }
       invisible(self)
     },
@@ -2139,9 +2189,12 @@ SimParam = R6Class(
     #' @param father vector of father iids
     #' @param isDH indicator for DH lines
     #' @param hist new recombination history
+    #' @param histGen new recombination history (genetic coordinate)
     #' @param ploidy ploidy level
     addToRec = function(lastId,id,mother,father,isDH,
-                        hist,ploidy){
+                        hist,
+                        histGen=NULL,
+                        ploidy){
       nNewInd = lastId-private$.lastId
       stopifnot(nNewInd>0)
       if(length(isDH)==1) isDH = rep(isDH,nNewInd)
@@ -2153,6 +2206,8 @@ SimParam = R6Class(
                 length(isDH)==nNewInd)
       tmp = cbind(mother,father,isDH)
       rownames(tmp) = id
+      keepRecHistGen = isTRUE(getOption("AlphaSimR.tsForwardKeepRecHistGen", FALSE))
+      storeRecHistGen = keepRecHistGen
       if(is.null(hist)){
         newRecHist = vector("list",nNewInd)
         tmpLastHaplo = private$.lastHaplo
@@ -2172,12 +2227,35 @@ SimParam = R6Class(
         names(newRecHist) = id
         private$.recHist = c(private$.recHist, newRecHist)
         private$.lastHaplo = tmpLastHaplo
+
+        if(private$.isTrackRecGen){
+          if(storeRecHistGen){
+            private$.recHistGen = c(private$.recHistGen, newRecHist)
+          }else{
+            emptyRecHistGen = vector("list", nNewInd)
+            names(emptyRecHistGen) = id
+            private$.recHistGen = c(private$.recHistGen, emptyRecHistGen)
+          }
+        }
       }else{
         # Add hist to recombination history
         private$.hasHap = c(private$.hasHap, rep(FALSE, nNewInd))
         private$.isFounder = c(private$.isFounder, rep(FALSE, nNewInd))
         names(hist) = id
         private$.recHist = c(private$.recHist, hist)
+        if(private$.isTrackRecGen){
+          if(storeRecHistGen){
+            if(is.null(histGen)){
+              histGen = vector("list", nNewInd)
+            }
+            names(histGen) = id
+            private$.recHistGen = c(private$.recHistGen, histGen)
+          }else{
+            emptyRecHistGen = vector("list", nNewInd)
+            names(emptyRecHistGen) = id
+            private$.recHistGen = c(private$.recHistGen, emptyRecHistGen)
+          }
+        }
       }
       private$.pedigree = rbind(private$.pedigree, tmp)
       private$.lastId = lastId
@@ -2292,6 +2370,8 @@ SimParam = R6Class(
     .pedigree="matrix",
     .isTrackRec="logical",
     .recHist="list",
+    .isTrackRecGen = "logical",
+    .recHistGen = "list",
     .varA="numeric",
     .varG="numeric",
     .varE="numeric",
@@ -2734,6 +2814,25 @@ SimParam = R6Class(
         stop("`$recHist` is read only",call.=FALSE)
       }
     },
+
+    #' @field isTrackRecGen is genetic-coordinate recombination being tracked.
+    isTrackRecGen = function(value){
+      if(missing(value)){
+        private$.isTrackRecGen
+      }else{
+        stop("`$isTrackRecGen` is read only",call.=FALSE)
+      }
+    },
+
+    #' @field recHistGen list of historic genetic-coordinate recombination events.
+    recHistGen = function(value){
+      if(missing(value)){
+        private$.recHistGen
+      }else{
+        stop("`$recHistGen` is read only",call.=FALSE)
+      }
+    },
+
 
     #' @field haplotypes list of computed IBD haplotypes
     haplotypes=function(value){

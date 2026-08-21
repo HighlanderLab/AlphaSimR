@@ -1,0 +1,385 @@
+---
+title: "test MaCSTS 1"
+output: html_document
+date: "2026-06-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## General Notes
+
+- `MaCSTS()` now returns ts tables per chromosome: records ancestry from MaCS local trees (nodes/edges/intervals), and with `useMacsMut = TRUE` it also records MaCS-generated sites/mutations during simulation.
+- TS ancestry/mutation work is split into staged helpers: `simAnc()`, `simMut()`, and `finalizeInbredTs()` (optional, when `inbred=TRUE`).
+- `MaCSTS()`is designed to be a part of the high-level `runMacsTS()` wrapper, which will handle:
+
+   - 1.TS generation (simAnc, and optionally simMut depending on mode);
+   - 2.TS-to-founder conversion (logic in `R/makeFoundersFromTs.R`: site sampling/filtering, genMap construction);
+   - 3.return a MapPop object like runMacs.
+   
+- Current TS chromosome count uses `nChr` (not `maxSites`, `maxSites` will only be in high level wrapper runMacsTS).
+- Per-chromosome simulation runs in parallel when OpenMP is available (`nThreads`).
+
+## Goal Of This Notebook
+
+First validate `useMacsMut = TRUE`, because it should be directly comparable to legacy `MaCS` under the same args and seeds.
+
+Note: when `useMacsMut = FALSE`, even ancestry (trees without mutation) can differ from MaCS because of RNG state changes! Specifically, it’s one shared RNG state/stream; MaCS (and MaCSTS with useMacsMut=TRUE) consume draws for both ancestry and mutation; MaCSTS with useMacsMut=FALSE skips mutation draws, so change later RNG state. 
+
+## Helpers to Compare MaCSTS with MaCS
+
+Helper overview:
+
+- extract_macs_chr(): get site positions + haplotypes from legacy MaCS output.
+- extract_ts_chr(): get site positions + haplotypes from TS tables via variant iterator.
+- compare_chr(): run strict and order-robust chromosome-level equivalence checks.
+- run_case(): run MaCS and MaCSTS(useMacsMut=TRUE) with matched args/seeds and compare.
+
+```{r}
+devtools::load_all()
+library(RcppTskit)
+
+# Convert raw 00/01 display values to integer 0/1 matrix.
+to_int01 <- function(x) {
+  matrix(as.integer(x), nrow = nrow(x), ncol = ncol(x), dimnames = dimnames(x))
+}
+
+# Read one chromosome from MaCS output (genMap + unpacked haplotypes).
+extract_macs_chr <- function(macs_out, chr = 1L, nThreads = 1L) {
+  pos <- as.numeric(macs_out$genMap[[chr]])
+  n_sites <- length(pos)
+  if (n_sites == 0L) {
+    return(list(pos = numeric(0), hap = matrix(integer(0), nrow = 0, ncol = 0)))
+  }
+  chr_geno <- macs_out$geno[chr]
+  hap_raw <- AlphaSimR:::getHaplo(
+    geno = chr_geno,
+    lociPerChr = as.integer(n_sites),
+    lociLoc = as.integer(seq_len(n_sites)),
+    nThreads = as.integer(nThreads)
+  )
+  list(pos = pos, hap = to_int01(hap_raw))
+}
+
+# Read one chromosome from TS tables (positions + variant genotypes).
+extract_ts_chr <- function(tc_xptr) {
+  tc <- RcppTskit::TableCollection$new(xptr = tc_xptr)
+  ts <- tc$tree_sequence()
+  n_samples <- as.integer(ts$num_samples())
+
+  it <- ts$variants()
+  pos <- numeric(0)
+  cols <- list()
+  repeat {
+    v <- it$next_variant()
+    if (is.null(v)) break
+    pos <- c(pos, as.numeric(v$position))
+    cols[[length(cols) + 1L]] <- as.integer(v$genotypes)
+  }
+
+  hap <- if (length(cols) == 0L) {
+    matrix(integer(0), nrow = n_samples, ncol = 0L)
+  } else {
+    do.call(cbind, cols)
+  }
+
+  list(
+    pos = pos,
+    hap = hap,
+    num_sites = as.integer(ts$num_sites()),
+    num_mutations = as.integer(ts$num_mutations())
+  )
+}
+
+# Sort position/genotype columns by position for strict positional matching.
+sort_by_pos <- function(x) {
+  if (length(x$pos) == 0L) return(x)
+  o <- order(x$pos)
+  list(pos = x$pos[o], hap = x$hap[, o, drop = FALSE])
+}
+
+# Build position+haplotype keys for multiset comparison.
+site_hap_keys <- function(pos, hap) {
+  if (length(pos) == 0L) return(character(0))
+  p <- format(signif(pos, 15), scientific = FALSE, trim = TRUE)
+  vapply(
+    seq_len(ncol(hap)),
+    function(j) paste0(p[j], "|", paste(hap[, j], collapse = "")),
+    character(1)
+  )
+}
+
+# Compare one chromosome:
+# 1) strict check after sorting by position,
+# 2) multiset check to tolerate column-order differences.
+compare_chr <- function(macs_chr, ts_chr) {
+  A <- sort_by_pos(macs_chr)
+  B <- sort_by_pos(ts_chr)
+
+  same_nsites <- ncol(A$hap) == ncol(B$hap)
+  same_positions_strict <- isTRUE(all.equal(A$pos, B$pos, tolerance = 0))
+  same_hap_strict <- identical(A$hap, B$hap)
+
+  # Order-robust check for duplicate-position edge cases
+  keysA <- site_hap_keys(macs_chr$pos, macs_chr$hap)
+  keysB <- site_hap_keys(ts_chr$pos, ts_chr$hap)
+  same_site_hap_multiset <- identical(sort(keysA), sort(keysB))
+
+  data.frame(
+    same_nsites = same_nsites,
+    same_positions_strict = same_positions_strict,
+    same_hap_strict = same_hap_strict,
+    same_site_hap_multiset = same_site_hap_multiset,
+    ts_num_sites = ts_chr$num_sites,
+    ts_num_mutations = ts_chr$num_mutations
+  )
+}
+
+# Run a full matched-seed comparison for nChr chromosomes.
+run_case <- function(args, nChr, inbred, ploidy, seed, nThreads = 1L) {
+  seed_vec <- rep(as.integer(seed), as.integer(nChr))
+
+  macs <- AlphaSimR:::MaCS(
+    args = args,
+    maxSites = rep(0L, as.integer(nChr)),
+    inbred = inbred,
+    ploidy = as.integer(ploidy),
+    nThreads = as.integer(nThreads),
+    seed = seed_vec
+  )
+
+  ts_out <- AlphaSimR:::MaCSTS(
+    args = args,
+    nChr = as.integer(nChr),
+    inbred = inbred,
+    ploidy = as.integer(ploidy),
+    nThreads = as.integer(nThreads),
+    seed = seed_vec,
+    usePhysicalPositions = FALSE,
+    useMacsMut = TRUE
+  )
+
+  out <- lapply(seq_len(as.integer(nChr)), function(chr) {
+    m <- extract_macs_chr(macs, chr = chr, nThreads = nThreads)
+    t <- extract_ts_chr(ts_out$tables[[chr]])
+    cbind(chr = chr, compare_chr(m, t))
+  })
+  do.call(rbind, out)
+}
+```
+
+## General Case
+In the first case, I will use some more detail results to show what are the objects being compared here:
+```{r}
+args <- "4 10000 -t 1e-3 -r 1e-2 -s "
+seed <- as.integer(42)
+inbred <- FALSE
+ploidy <- 2L
+nChr <- 1L
+
+macs <- AlphaSimR:::MaCS(
+    args = args,
+    maxSites = rep(0L, as.integer(nChr)),
+    inbred = inbred,
+    ploidy = ploidy,
+    seed = seed,
+    nThreads = 1L
+  )
+
+  ts_out <- AlphaSimR:::MaCSTS(
+    args = args,
+    nChr = nChr,
+    inbred = inbred,
+    ploidy = ploidy,
+    seed = seed,
+    usePhysicalPositions = FALSE,
+    useMacsMut = TRUE,
+    nThreads = 1L
+  )
+
+chr = 1L  
+m <- extract_macs_chr(macs, chr = chr)
+t <- extract_ts_chr(ts_out$tables[[chr]])
+```
+
+Both genotypes and positions matched between MaCS and MaCSTS with `useMacsMut = TRUE`:
+
+```
+> print(m)
+$pos
+ [1] 0.1589878 0.1677192 0.1945866 0.2692034 0.2851194 0.2942718
+ [7] 0.3008355 0.3116991 0.3385464 0.3423128 0.3543942 0.4430878
+[13] 0.4690506 0.4930433 0.5781099 0.6904748 0.7921847 0.8604606
+
+$hap
+     [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11] [,12]
+[1,]    1    0    0    0    0    0    1    0    1     0     0     0
+[2,]    1    0    1    1    1    1    0    1    0     0     0     0
+[3,]    0    1    1    0    0    0    1    0    1     1     1     1
+[4,]    0    1    1    0    0    0    1    0    0     0     0     0
+     [,13] [,14] [,15] [,16] [,17] [,18]
+[1,]     0     0     0     0     1     0
+[2,]     0     0     1     0     1     0
+[3,]     0     1     1     0     0     0
+[4,]     1     0     0     1     0     1
+```
+```
+> print(t)
+$pos
+ [1] 0.1589878 0.1677192 0.1945866 0.2692034 0.2851194 0.2942718
+ [7] 0.3008355 0.3116991 0.3385464 0.3423128 0.3543942 0.4430878
+[13] 0.4690506 0.4930433 0.5781099 0.6904748 0.7921847 0.8604606
+
+$hap
+     [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11] [,12]
+[1,]    1    0    0    0    0    0    1    0    1     0     0     0
+[2,]    1    0    1    1    1    1    0    1    0     0     0     0
+[3,]    0    1    1    0    0    0    1    0    1     1     1     1
+[4,]    0    1    1    0    0    0    1    0    0     0     0     0
+     [,13] [,14] [,15] [,16] [,17] [,18]
+[1,]     0     0     0     0     1     0
+[2,]     0     0     1     0     1     0
+[3,]     0     1     1     0     0     0
+[4,]     1     0     0     1     0     1
+
+$num_sites
+[1] 18
+
+$num_mutations
+[1] 18
+```
+
+Or we can run:
+```{r}
+z <- run_case(
+      args = args,
+      nChr = 1L,
+      inbred = inbred,
+      ploidy = ploidy,
+      seed = seed
+    )
+```
+`same_hap_strict = TRUE` plus `same_positions_strict = TRUE` means direct compatibility matched exactly:
+```
+> print(z)
+  chr same_nsites same_positions_strict same_hap_strict
+1   1        TRUE                  TRUE            TRUE
+  same_site_hap_multiset ts_num_sites ts_num_mutations
+1                   TRUE           18               18
+```
+
+## More cases
+Now I will run a scenario sweep with 5 different scenarios, and all of them show the same result that MaCSTS with `useMacsMut = TRUE` can reproduce the same sites and haplotypes as MaCS.
+
+### Scenario1: ploidy = 1L
+```{r}
+args <- "4 10000 -t 1e-3 -r 1e-2 -s "
+seed <- as.integer(42)
+inbred <- FALSE
+ploidy <- 1L
+nChr <- 1L
+z1 <- run_case(
+      args = args,
+      nChr = 1L,
+      inbred = inbred,
+      ploidy = ploidy,
+      seed = seed
+    )
+print(z1)
+```
+
+### Scenario2: inbred = TRUE
+```{r}
+args <- "4 10000 -t 1e-3 -r 1e-2 -s "
+seed <- as.integer(42)
+inbred <- TRUE
+ploidy <- 2L
+nChr <- 1L
+z2 <- run_case(
+      args = args,
+      nChr = 1L,
+      inbred = inbred,
+      ploidy = ploidy,
+      seed = seed
+    )
+print(z2)
+```
+
+### Scenario3: demography
+```{r}
+# eN 0.2 2.0: at time 0.2, size jumps to 2x baseline.
+# eN 1.0 0.5: at time 1.0, size jumps to 0.5x baseline.
+args <- "4 10000 -t 1e-3 -r 1e-2 -eN 0.2 2.0 -eN 1.0 0.5 -s "
+seed <- as.integer(42)
+inbred <- FALSE
+ploidy <- 2L
+nChr <- 1L
+z3 <- run_case(
+      args = args,
+      nChr = 1L,
+      inbred = inbred,
+      ploidy = ploidy,
+      seed = seed
+    )
+print(z3)
+```
+
+
+### Scenario4: 2 populations after a split
+```{r}
+# -I: 8 sampled chromosomes from 2 pops total, with 4 from pop 1 and 4 from pop 2
+# -ej: at time 1.0, pop 2 merges into pop 1 (backward), which corresponds to a split from pop 1 to pop 2 forward in time.
+args <- "8 10000 -t 1e-3 -r 1e-2 -I 2 4 4 -ej 1.0 2 1 -s "
+seed <- as.integer(42)
+inbred <- FALSE
+ploidy <- 2L
+nChr <- 1L
+
+ts_out4 <- AlphaSimR:::MaCSTS(
+  args = args,
+  nChr = nChr,
+  inbred = inbred,
+  ploidy = ploidy,
+  seed = seed,
+  usePhysicalPositions = FALSE,
+  useMacsMut = TRUE,
+  nThreads = 1L
+)
+
+# read population info from node table for the 4th node (which should be in pop 2 after the split)
+tc4 <- RcppTskit::TableCollection$new(xptr = ts_out4$tables[[1]])
+tc4$node_table_get_row(4)['population']
+tc4$node_table_get_row(3)['population']
+
+z4 <- run_case(
+      args = args,
+      nChr = 1L,
+      inbred = inbred,
+      ploidy = ploidy,
+      seed = seed
+    )
+print(z4)
+```
+
+### Scenario5: 2 populations with a migration
+```{r}
+# -I: 8 sampled chromosomes from 2 pops total, with 4 from pop 1 and 4 from pop 2
+# at backward time t = 0.5, set the global migration-rate parameter to 5e-3 for all populations
+args <- "8 10000 -t 1e-3 -r 1e-2 -I 2 4 4 -eM 0.5 5e-3 -s "
+seed <- as.integer(42)
+inbred <- FALSE
+ploidy <- 2L
+nChr <- 1L
+
+z5 <- run_case(
+      args = args,
+      nChr = 1L,
+      inbred = inbred,
+      ploidy = ploidy,
+      seed = seed
+    )
+print(z5)
+```
+
+
