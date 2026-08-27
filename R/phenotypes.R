@@ -161,7 +161,7 @@ setGeneric(
   "setPheno",
   function(
     pop, h2=NULL, H2=NULL, varE=NULL, corE=NULL, reps=1, fixEff=1L, p=NULL,
-    onlyPheno=FALSE, traits=NULL, simParam=NULL,...){
+    onlyPheno=FALSE, traits=NULL, simParam=NULL){
     standardGeneric("setPheno")
   }
 )
