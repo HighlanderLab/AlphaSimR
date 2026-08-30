@@ -22,7 +22,7 @@ pedigreeCross(
 \item{founderPop}{a \code{\link{Pop-class}}}
 
 \item{id}{a vector of unique identifiers for individuals
-in the pedigree. The values of these IDs are seperate from
+in the pedigree. The values of these IDs are separate from
 the IDs in the founderPop if matchID=FALSE.}
 
 \item{mother}{a vector of identifiers for the mothers

@@ -103,10 +103,10 @@ hist(tmp[, "phenoExpMeanExp1"], main = paste0("Mean: ", v=tmp2$phenoExpMeanExp1$
 abline(v= tmp2$phenoExpMeanExp1$mean, col = "red")
 
 #Convert multiple input traits
-asLogNormal(pheno(pop))
-try(asLogNormal(pheno(pop), meanLogShift = 0))
-asLogNormal(pheno(pop), meanLogShift = c(0, 1))
-asLogNormal(pheno(pop), meanLogShift = list(0, NULL))
+asLogNormal(x = pheno(pop))
+try(asLogNormal(x = pheno(pop), meanlog = 0))
+asLogNormal(x = pheno(pop), meanlog = c(0, 1))
+asLogNormal(x = pheno(pop), meanlog = list(0, NULL))
 
 #Store the recoded trait manually
 pheno(pop)

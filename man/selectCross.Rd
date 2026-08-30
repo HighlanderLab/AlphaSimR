@@ -2,6 +2,7 @@
 % Please edit documentation in R/crossing.R
 \name{selectCross}
 \alias{selectCross}
+\alias{selectCross,Pop-method}
 \title{Select and randomly cross}
 \usage{
 selectCross(
@@ -14,6 +15,22 @@ selectCross(
   trait = 1,
   use = "pheno",
   selectTop = TRUE,
+  simParam = NULL,
+  nThreads = NULL,
+  ...,
+  balance = TRUE
+)
+
+\S4method{selectCross}{Pop}(
+  pop,
+  nInd = NULL,
+  nFemale = NULL,
+  nMale = NULL,
+  nCrosses,
+  nProgeny = 1,
+  trait = 1,
+  use = "pheno",
+  selectTop = T,
   simParam = NULL,
   nThreads = NULL,
   ...,
@@ -75,6 +92,11 @@ of intermediate populations created. This reduces RAM usage
 and simplifies code writing. Note that this wrapper does not
 provide the full functionality of either function.
 }
+\section{Functions}{
+\itemize{
+\item \code{selectCross(Pop)}: Method for \code{\link{Pop-class}}
+
+}}
 \examples{
 #Create founder haplotypes
 founderPop = quickHaplo(nInd=10, nChr=1, segSites=10)

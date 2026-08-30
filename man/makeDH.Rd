@@ -2,9 +2,19 @@
 % Please edit documentation in R/crossing.R
 \name{makeDH}
 \alias{makeDH}
+\alias{makeDH,Pop-method}
 \title{Generates DH lines}
 \usage{
 makeDH(
+  pop,
+  nDH = 1,
+  useFemale = TRUE,
+  keepParents = TRUE,
+  simParam = NULL,
+  nThreads = NULL
+)
+
+\S4method{makeDH}{Pop}(
   pop,
   nDH = 1,
   useFemale = TRUE,
@@ -38,6 +48,11 @@ Creates DH lines from each individual in a population.
 Only works with diploid individuals. For polyploids, use
 \code{\link{reduceGenome}} and \code{\link{doubleGenome}}.
 }
+\section{Functions}{
+\itemize{
+\item \code{makeDH(Pop)}: Method for \code{\link{Pop-class}}
+
+}}
 \examples{
 #Create founder haplotypes
 founderPop = quickHaplo(nInd=2, nChr=1, segSites=10)

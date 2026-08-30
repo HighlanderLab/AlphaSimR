@@ -8,7 +8,7 @@
 #' @param crossPlan a matrix with two column representing
 #' female and male parents. Either integers for the position in
 #' population or character strings for the IDs.
-#' @param nProgeny number of progeny per cross. May be a single value for all 
+#' @param nProgeny number of progeny per cross. May be a single value for all
 #' crosses or a vector with values for each cross.
 #' @param simParam an object of class \code{\link{SimParam}}. If
 #' \code{NULL}, the function uses the object named \code{SP} from the
@@ -40,22 +40,43 @@
 #' pop3 = makeCross(pop, crossPlan, nProgeny=c(1,2),simParam=SP)
 #' getPed(pop3)
 #' @export
-makeCross = function(pop, crossPlan, nProgeny=1,
-                     simParam=NULL, nThreads=NULL){
+setGeneric(
+  "makeCross",
+  function(pop, crossPlan, nProgeny=1, simParam=NULL, nThreads=NULL){
+    standardGeneric("makeCross")
+  }
+)
+
+#' @describeIn makeCross Method for \code{\link{Pop-class}}
+#' @export
+setMethod(
+  "makeCross",
+  signature(pop = "Pop"),
+  function(pop, crossPlan, nProgeny=1, simParam=NULL, nThreads=NULL){
+    .makeCross_internal(
+      pop=pop, crossPlan=crossPlan, nProgeny=nProgeny, simParam=simParam,
+      nThreads=nThreads)
+  }
+)
+
+# Internal implementation shared by makeCross methods
+#' @keywords internal
+.makeCross_internal = function(pop,crossPlan,nProgeny=1,
+                               simParam=NULL,nThreads=NULL){
   if(is.null(simParam)){
     simParam = get("SP",envir=.GlobalEnv)
   }
-  
+
   if(is.null(nThreads)){
     nThreads = simParam$nThreads
   }else{
     nThreads = as.integer(nThreads)
   }
-  
+
   if(pop@ploidy%%2L != 0L){
-    stop("You can not cross indiviuals with odd ploidy levels")
+    stop("You can not cross individuals with odd ploidy levels")
   }
-  
+
   if(is.character(crossPlan)){ #Match by ID
     crossPlan = cbind(match(crossPlan[,1], pop@id),
                       match(crossPlan[,2], pop@id))
@@ -63,12 +84,12 @@ makeCross = function(pop, crossPlan, nProgeny=1,
       stop("Failed to match supplied IDs")
     }
   }
-  
+
   if((max(crossPlan)>nInd(pop)) |
      (min(crossPlan)<1L)){
     stop("Invalid crossPlan")
   }
-  
+
   # Handle nProgeny
   if(length(nProgeny)==1){
     if(nProgeny>1){
@@ -77,11 +98,11 @@ makeCross = function(pop, crossPlan, nProgeny=1,
     }
   }else{
     stopifnot("Length of nProgeny must equal 1 or nrow(crossPlan)" = nrow(crossPlan)==length(nProgeny))
-    
+
     crossPlan = cbind(rep(crossPlan[,1], times=nProgeny),
                       rep(crossPlan[,2], times=nProgeny))
   }
-  
+
   tmp = cross(pop@geno,
               crossPlan[,1],
               pop@geno,
@@ -97,22 +118,22 @@ makeCross = function(pop, crossPlan, nProgeny=1,
               simParam$maleCentromere,
               simParam$quadProb,
               nThreads)
-  
+
   dim(tmp$geno) = NULL # Account for matrix bug in RcppArmadillo
-  
+
   rPop = new("RawPop",
              nInd=nrow(crossPlan),
              nChr=pop@nChr,
              ploidy=pop@ploidy,
              nLoci=pop@nLoci,
              geno=tmp$geno)
-  
+
   if(simParam$isTrackRec){
     hist = tmp$recHist
   }else{
     hist = NULL
   }
-  
+
   return(.newPop(rawPop=rPop,
                  mother=pop@id[crossPlan[,1]],
                  father=pop@id[crossPlan[,2]],
@@ -129,12 +150,12 @@ makeCross = function(pop, crossPlan, nProgeny=1,
 #'
 #' @description
 #' A wrapper for \code{\link{makeCross}} that randomly
-#' selects parental combinations for all possible combinantions.
+#' selects parental combinations for all possible combinations.
 #'
 #' @param pop an object of \code{\link{Pop-class}}
 #' @param nCrosses total number of crosses to make
-#' @param nProgeny number of progeny per cross. May be a single value for all 
-#' crosses or a vector with values equal to the number of crosses. If providing 
+#' @param nProgeny number of progeny per cross. May be a single value for all
+#' crosses or a vector with values equal to the number of crosses. If providing
 #' a vector, the values are randomly assigned to each cross.
 #' @param balance if using sexes, this option will balance the number
 #' of progeny per parent
@@ -163,37 +184,63 @@ makeCross = function(pop, crossPlan, nProgeny=1,
 #' pop2 = randCross(pop, 10, simParam=SP)
 #'
 #' @export
-randCross = function(pop, nCrosses, nProgeny=1,
-                     balance=TRUE, parents=NULL,
+setGeneric(
+  "randCross",
+  function(
+    pop, nCrosses, nProgeny=1, balance=TRUE, parents=NULL, ignoreSexes=FALSE,
+    simParam=NULL, nThreads=NULL){
+    standardGeneric("randCross")
+  }
+)
+
+#' @describeIn randCross Method for \code{\link{Pop-class}}
+#' @export
+setMethod(
+  "randCross",
+  signature(pop = "Pop"),
+  function(
+    pop, nCrosses, nProgeny=1, balance=TRUE, parents=NULL, ignoreSexes=FALSE,
+    simParam=NULL, nThreads=NULL){
+    .randCross_internal(
+      pop=pop, nCrosses=nCrosses, nProgeny=nProgeny, balance=balance,
+      parents=parents, ignoreSexes=ignoreSexes, simParam=simParam,
+      nThreads=nThreads)
+  }
+)
+
+# Internal implementation shared by randCross methods
+#' @keywords internal
+.randCross_internal = function(pop,nCrosses,nProgeny=1,
+                     balance=TRUE,parents=NULL,
                      ignoreSexes=FALSE,
                      simParam=NULL, nThreads=NULL){
   if(is.null(simParam)){
     simParam = get("SP",envir=.GlobalEnv)
   }
-  
+
   if(is.null(nThreads)){
     nThreads = simParam$nThreads
   }else{
     nThreads = as.integer(nThreads)
   }
-  
+
   if(is.null(parents)){
     parents = 1:pop@nInd
   }else{
     parents = as.integer(parents)
   }
-  
+
   n = length(parents)
   if(n<=1){
     stop("The population must contain more than 1 individual")
   }
-  
+
   # Handle nProgeny
   if(length(nProgeny)>1){
     stopifnot("Length of nProgeny must equal 1 or nCrosses" = nCrosses==length(nProgeny))
     nProgeny = nProgeny[sample(nCrosses, nCrosses)]
   }
-  
+
   if(simParam$sexes=="no" | ignoreSexes){
     crossPlan = sampHalfDialComb(n, nCrosses)
     crossPlan[,1] = parents[crossPlan[,1]]
@@ -229,7 +276,7 @@ randCross = function(pop, nCrosses, nProgeny=1,
       crossPlan[,2] = male[crossPlan[,2]]
     }
   }
-  
+
   return(makeCross(pop=pop, crossPlan=crossPlan, nProgeny=nProgeny,
                    simParam=simParam, nThreads=nThreads))
 }
@@ -294,9 +341,36 @@ randCross = function(pop, nCrosses, nProgeny=1,
 #' pop2 = selectCross(pop, nInd=4, nCrosses=8, simParam=SP)
 #'
 #' @export
-selectCross = function(pop, nInd=NULL, nFemale=NULL, nMale=NULL, nCrosses,
-                       nProgeny=1, trait=1, use="pheno", selectTop=TRUE,
-                       simParam=NULL, nThreads=NULL, ..., balance=TRUE){
+setGeneric(
+  "selectCross",
+  function(
+    pop, nInd=NULL, nFemale=NULL, nMale=NULL, nCrosses, nProgeny=1, trait=1,
+    use="pheno", selectTop=TRUE, simParam=NULL, nThreads=NULL, ..., balance=TRUE){
+    standardGeneric("selectCross")
+  }
+)
+
+
+#' @describeIn selectCross Method for \code{\link{Pop-class}}
+#' @export
+setMethod(
+  "selectCross",
+  signature(pop = "Pop"),
+  function(
+    pop, nInd=NULL, nFemale=NULL, nMale=NULL, nCrosses, nProgeny=1, trait=1,
+    use="pheno", selectTop=T, simParam=NULL, nThreads=NULL, ..., balance=TRUE){
+    .selectCross_internal(
+      pop=pop, nInd=nInd, nFemale=nFemale, nMale=nMale, nCrosses=nCrosses,
+      nProgeny=nProgeny, trait=trait, use=use, selectTop=selectTop,
+      simParam=simParam, nThreads=nThreads, ..., balance=balance)
+  }
+)
+
+# Internal implementation shared by selectCross methods
+#' @keywords internal
+.selectCross_internal = function(pop,nInd=NULL,nFemale=NULL,nMale=NULL,nCrosses,
+                       nProgeny=1,trait=1,use="pheno",selectTop=TRUE,
+                       simParam=NULL,nThreads=NULL,...,balance=TRUE){
   if(is.null(simParam)){
     simParam = get("SP",envir=.GlobalEnv)
   }
@@ -327,7 +401,7 @@ selectCross = function(pop, nInd=NULL, nFemale=NULL, nMale=NULL, nCrosses,
                       nThreads=nThreads, ...)
     parents = c(females,males)
   }
-  
+
   return(randCross(pop=pop, nCrosses=nCrosses, nProgeny=nProgeny,
                    balance=balance, parents=parents,
                    ignoreSexes=FALSE, simParam=simParam,
@@ -345,7 +419,7 @@ selectCross = function(pop, nInd=NULL, nFemale=NULL, nMale=NULL, nCrosses,
 #' @param crossPlan a matrix with two column representing
 #' female and male parents. Either integers for the position in
 #' population or character strings for the IDs.
-#' @param nProgeny number of progeny per cross. May be a single value for all 
+#' @param nProgeny number of progeny per cross. May be a single value for all
 #' crosses or a vector with values for each cross.
 #' @param simParam an object of class \code{\link{SimParam}}. If
 #' \code{NULL}, the function uses the object named \code{SP} from the
@@ -377,23 +451,44 @@ selectCross = function(pop, nInd=NULL, nFemale=NULL, nMale=NULL, nCrosses,
 #' pop3 = makeCross2(pop, pop, crossPlan, nProgeny=c(1,2),simParam=SP)
 #' getPed(pop3)
 #' @export
-makeCross2 = function(females, males, crossPlan, nProgeny=1, simParam=NULL,
+setGeneric(
+  "makeCross2",
+  function(females,males,crossPlan,nProgeny=1,simParam=NULL, nThreads=NULL){
+    standardGeneric("makeCross2")
+  }
+)
+
+#' @describeIn makeCross2 Method for \code{\link{Pop-class}}
+#' @export
+setMethod(
+  "makeCross2",
+  signature(females = "Pop", males = "Pop"),
+  function(females,males,crossPlan,nProgeny=1,simParam=NULL, nThreads=NULL){
+    .makeCross2_internal(
+      females=females, males=males, crossPlan=crossPlan, nProgeny=nProgeny,
+      simParam=simParam, nThreads=nThreads)
+  }
+)
+
+# Internal implementation shared by makeCross2 methods
+#' @keywords internal
+.makeCross2_internal = function(females,males,crossPlan,nProgeny=1,simParam=NULL,
                       nThreads=NULL){
   if(is.null(simParam)){
     simParam = get("SP",envir=.GlobalEnv)
   }
-  
+
   if(is.null(nThreads)){
     nThreads = simParam$nThreads
   }else{
     nThreads = as.integer(nThreads)
   }
-  
+
   if((females@ploidy%%2L != 0L) |
      (males@ploidy%%2L != 0L)){
-    stop("You can not cross indiviuals with odd ploidy levels")
+    stop("You can not cross individuals with odd ploidy levels")
   }
-  
+
   if(is.character(crossPlan)){ #Match by ID
     crossPlan = cbind(match(crossPlan[,1],females@id),
                       match(crossPlan[,2],males@id))
@@ -401,13 +496,13 @@ makeCross2 = function(females, males, crossPlan, nProgeny=1, simParam=NULL,
       stop("Failed to match supplied IDs")
     }
   }
-  
+
   if((max(crossPlan[,1])>nInd(females)) |
      (max(crossPlan[,2])>nInd(males)) |
      (min(crossPlan)<1L)){
     stop("Invalid crossPlan")
   }
-  
+
   # Handle nProgeny
   if(length(nProgeny)==1){
     if(nProgeny>1){
@@ -416,11 +511,11 @@ makeCross2 = function(females, males, crossPlan, nProgeny=1, simParam=NULL,
     }
   }else{
     stopifnot("Length of nProgeny must equal 1 or nrow(crossPlan)" = nrow(crossPlan)==length(nProgeny))
-    
+
     crossPlan = cbind(rep(crossPlan[,1], times=nProgeny),
                       rep(crossPlan[,2], times=nProgeny))
   }
-  
+
   tmp=cross(females@geno,
             crossPlan[,1],
             males@geno,
@@ -436,22 +531,22 @@ makeCross2 = function(females, males, crossPlan, nProgeny=1, simParam=NULL,
             simParam$maleCentromere,
             simParam$quadProb,
             nThreads)
-  
+
   dim(tmp$geno) = NULL # Account for matrix bug in RcppArmadillo
-  
+
   rPop = new("RawPop",
              nInd=nrow(crossPlan),
              nChr=females@nChr,
              ploidy=as.integer((females@ploidy+males@ploidy)/2),
              nLoci=females@nLoci,
              geno=tmp$geno)
-  
+
   if(simParam$isTrackRec){
     hist = tmp$recHist
   }else{
     hist = NULL
   }
-  
+
   return(.newPop(rawPop=rPop,
                  mother=females@id[crossPlan[,1]],
                  father=males@id[crossPlan[,2]],
@@ -468,14 +563,14 @@ makeCross2 = function(females, males, crossPlan, nProgeny=1, simParam=NULL,
 #'
 #' @description
 #' A wrapper for \code{\link{makeCross2}} that randomly
-#' selects parental combinations for all possible combinantions between
+#' selects parental combinations for all possible combinations between
 #' two populations.
 #'
 #' @param females an object of \code{\link{Pop-class}} for female parents.
 #' @param males an object of \code{\link{Pop-class}} for male parents.
 #' @param nCrosses total number of crosses to make
-#' @param nProgeny number of progeny per cross. May be a single value for all 
-#' crosses or a vector with values equal to the number of crosses. If providing 
+#' @param nProgeny number of progeny per cross. May be a single value for all
+#' crosses or a vector with values equal to the number of crosses. If providing
 #' a vector, the values are randomly assigned to each cross.
 #' @param balance this option will balance the number
 #' of progeny per parent
@@ -507,33 +602,60 @@ makeCross2 = function(females, males, crossPlan, nProgeny=1, simParam=NULL,
 #' pop2 = randCross2(pop, pop, 10, simParam=SP)
 #'
 #' @export
-randCross2 = function(females, males, nCrosses, nProgeny=1,
-                      balance=TRUE, femaleParents=NULL,
-                      maleParents=NULL, ignoreSexes=FALSE,
-                      simParam=NULL, nThreads=NULL){
+setGeneric(
+  "randCross2",
+  function(
+    females, males, nCrosses, nProgeny=1, balance=TRUE, femaleParents=NULL,
+    maleParents=NULL, ignoreSexes=FALSE, simParam=NULL, nThreads=NULL){
+    standardGeneric("randCross2")
+  }
+)
+
+#' @describeIn randCross2 Method for \code{\link{Pop-class}}
+#' @export
+setMethod(
+  "randCross2",
+  signature(females = "Pop", males = "Pop"),
+  function(
+    females, males, nCrosses, nProgeny=1, balance=TRUE, femaleParents=NULL,
+    maleParents=NULL, ignoreSexes=FALSE, simParam=NULL, nThreads=NULL){
+    .randCross2_internal(
+      females = females, males = males, nCrosses = nCrosses,
+      nProgeny = nProgeny, balance = balance, femaleParents = femaleParents,
+      maleParents = maleParents, ignoreSexes = ignoreSexes,
+      simParam = simParam, nThreads = nThreads)
+  }
+)
+
+# Internal implementation shared by randCross2 methods
+#' @keywords internal
+.randCross2_internal = function(
+    females, males, nCrosses, nProgeny=1, balance=TRUE, femaleParents=NULL,
+    maleParents=NULL, ignoreSexes=FALSE, simParam=NULL, nThreads=NULL){
+
   if(is.null(simParam)){
     simParam = get("SP",envir=.GlobalEnv)
   }
-  
+
   if(is.null(nThreads)){
     nThreads = simParam$nThreads
   }else{
     nThreads = as.integer(nThreads)
   }
-  
+
   #Set allowable parents
   if(is.null(femaleParents)){
     femaleParents = 1:females@nInd
   }else{
     femaleParents = as.integer(femaleParents)
   }
-  
+
   if(is.null(maleParents)){
     maleParents = 1:males@nInd
   }else{
     maleParents = as.integer(maleParents)
   }
-  
+
   if(simParam$sexes=="no" | ignoreSexes){
     female = femaleParents
     male = maleParents
@@ -549,16 +671,16 @@ randCross2 = function(females, males, nCrosses, nProgeny=1,
       stop("population doesn't contain any males")
     }
   }
-  
+
   # Handle nProgeny
   if(length(nProgeny)>1){
     stopifnot("Length of nProgeny must equal 1 or nCrosses" = nCrosses==length(nProgeny))
     nProgeny = nProgeny[sample(nCrosses, nCrosses)]
   }
-  
+
   nMale = length(male)
   nFemale = length(female)
-  
+
   if(balance){
     female = female[sample.int(nFemale, nFemale)]
     female = rep(female, length.out=nCrosses)
@@ -578,7 +700,7 @@ randCross2 = function(females, males, nCrosses, nProgeny=1,
     crossPlan[,1] = female[crossPlan[,1]]
     crossPlan[,2] = male[crossPlan[,2]]
   }
-  
+
   return(makeCross2(females=females, males=males,
                     crossPlan=crossPlan, nProgeny=nProgeny,
                     simParam=simParam, nThreads=nThreads))
@@ -591,7 +713,7 @@ randCross2 = function(females, males, nCrosses, nProgeny=1,
 #' population. Only works when sexes is "no".
 #'
 #' @param pop an object of \code{\link{Pop-class}}
-#' @param nProgeny number of selfed progeny per individual. May be a single value 
+#' @param nProgeny number of selfed progeny per individual. May be a single value
 #' for all or a vector providing values for each individual.
 #' @param parents an optional vector of indices for allowable parents
 #' @param keepParents should previous parents be used for mother and
@@ -619,19 +741,44 @@ randCross2 = function(females, males, nCrosses, nProgeny=1,
 #' pop2 = self(pop, simParam=SP)
 #'
 #' @export
-self = function(pop, nProgeny=1, parents=NULL, keepParents=TRUE,
-                simParam=NULL, nThreads=NULL){
-  
+setGeneric(
+  "self",
+  function(
+    pop, nProgeny=1, parents=NULL, keepParents=TRUE, simParam=NULL,
+    nThreads=NULL){
+    standardGeneric("self")
+  }
+)
+
+#' @describeIn self Method for \code{\link{Pop-class}}
+#' @export
+setMethod(
+  "self",
+  signature(pop = "Pop"),
+  function(
+    pop, nProgeny=1, parents=NULL, keepParents=TRUE, simParam=NULL,
+    nThreads=NULL){
+    .self_internal(
+      pop=pop, nProgeny=nProgeny, parents=parents, keepParents=keepParents,
+      simParam=simParam, nThreads = nThreads
+    )
+  }
+)
+
+# Internal implementation shared by self methods
+#' @keywords internal
+.self_internal = function(
+    pop,nProgeny=1,parents=NULL,keepParents=TRUE,simParam=NULL,nThreads=NULL){
   if(is.null(simParam)){
     simParam = get("SP",envir=.GlobalEnv)
   }
-  
+
   if(is.null(nThreads)){
     nThreads = simParam$nThreads
   }else{
     nThreads = as.integer(nThreads)
   }
-  
+
   if(is(pop,"MultiPop")){
     stopifnot(is.null(parents))
     pop@pops = lapply(pop@pops, self, nProgeny=nProgeny,
@@ -639,29 +786,29 @@ self = function(pop, nProgeny=1, parents=NULL, keepParents=TRUE,
                       simParam=simParam, nThreads=nThreads)
     return(pop)
   }
-  
+
   if(is.null(parents)){
     parents = 1:pop@nInd
   }else{
     parents = as.integer(parents)
   }
-  
+
   if(pop@ploidy%%2L != 0L){
     stop("You can not self aneuploids")
   }
-  
+
   # Handle nProgeny
   if(length(nProgeny)==1){
     crossPlan = rep(parents, each=nProgeny)
-    
+
   }else{
     stopifnot("Length of nProgeny must equal 1 or nInd(pop)" = nInd(pop)==length(nProgeny))
-    
+
     crossPlan = rep(parents, times=nProgeny)
   }
-  
+
   crossPlan = cbind(crossPlan,crossPlan)
-  
+
   tmp = cross(pop@geno,
               crossPlan[,1],
               pop@geno,
@@ -677,22 +824,22 @@ self = function(pop, nProgeny=1, parents=NULL, keepParents=TRUE,
               simParam$maleCentromere,
               simParam$quadProb,
               nThreads)
-  
+
   dim(tmp$geno) = NULL # Account for matrix bug in RcppArmadillo
-  
+
   rPop = new("RawPop",
              nInd=nrow(crossPlan),
              nChr=pop@nChr,
              ploidy=pop@ploidy,
              nLoci=pop@nLoci,
              geno=tmp$geno)
-  
+
   if(simParam$isTrackRec){
     hist = tmp$recHist
   }else{
     hist = NULL
   }
-  
+
   if(keepParents){
     return(.newPop(rawPop=rPop,
                    mother=pop@mother[crossPlan[,1]],
@@ -752,29 +899,52 @@ self = function(pop, nProgeny=1, parents=NULL, keepParents=TRUE,
 #' pop2 = makeDH(pop, simParam=SP)
 #'
 #' @export
-makeDH = function(pop, nDH=1, useFemale=TRUE, keepParents=TRUE,
-                  simParam=NULL, nThreads=NULL){
+setGeneric(
+  "makeDH",
+  function(
+    pop,nDH=1,useFemale=TRUE,keepParents=TRUE,simParam=NULL,nThreads=NULL){
+    standardGeneric("makeDH")
+  }
+)
+
+#' @describeIn makeDH Method for \code{\link{Pop-class}}
+#' @export
+setMethod(
+  "makeDH",
+  signature(pop = "Pop"),
+  function(
+    pop,nDH=1,useFemale=TRUE,keepParents=TRUE,simParam=NULL,nThreads=NULL){
+    .makeDH_internal(
+      pop=pop, nDH=nDH, useFemale=useFemale, keepParents=keepParents,
+      simParam=simParam, nThreads=nThreads)
+  }
+)
+
+# Internal implementation shared by .makeDH_internal methods
+#' @keywords internal
+.makeDH_internal = function(
+    pop,nDH=1,useFemale=TRUE,keepParents=TRUE,simParam=NULL,nThreads=NULL){
   if(is.null(simParam)){
     simParam = get("SP",envir=.GlobalEnv)
   }
-  
+
   if(is.null(nThreads)){
     nThreads = simParam$nThreads
   }else{
     nThreads = as.integer(nThreads)
   }
-  
+
   if(is(pop,"MultiPop")){
     pop@pops = lapply(pop@pops, makeDH, nDH=nDH, useFemale=useFemale,
                       keepParents=keepParents, simParam=simParam,
                       nThreads=nThreads)
     return(pop)
   }
-  
+
   if(pop@ploidy!=2){
     stop("Only works with diploids")
   }
-  
+
   if(useFemale){
     tmp = createDH2(pop@geno, nDH,
                     simParam$femaleMap,
@@ -790,22 +960,22 @@ makeDH = function(pop, nDH=1, useFemale=TRUE, keepParents=TRUE,
                     simParam$isTrackRec,
                     nThreads)
   }
-  
+
   dim(tmp$geno) = NULL # Account for matrix bug in RcppArmadillo
-  
+
   rPop = new("RawPop",
              nInd=as.integer(pop@nInd*nDH),
              nChr=pop@nChr,
              ploidy=pop@ploidy,
              nLoci=pop@nLoci,
              geno=tmp$geno)
-  
+
   if(simParam$isTrackRec){
     hist = tmp$recHist
   }else{
     hist = NULL
   }
-  
+
   if(keepParents){
     return(.newPop(rawPop=rPop,
                    mother=rep(pop@mother, each=nDH),
@@ -848,9 +1018,9 @@ sortPed = function(id, mother, father, maxCycle=100){
                       father=match(father, id),
                       motherID=as.character(mother),
                       fatherID=as.character(father))
-  
+
   unsorted = rep(TRUE, nInd)
-  
+
   for(gen in seq_len(maxCycle)){
     for(i in which(unsorted)){
       if(is.na(output$mother[i])&is.na(output$father[i])){
@@ -878,11 +1048,11 @@ sortPed = function(id, mother, father, maxCycle=100){
       }
     }
   }
-  
+
   if(any(unsorted)){
-    stop("Failed to sort pedigree, may contain loops or require a higher maxGen")
+    stop("Failed to sort pedigree, may contain loops or require a higher maxCycle")
   }
-  
+
   return(output)
 }
 
@@ -894,7 +1064,7 @@ sortPed = function(id, mother, father, maxCycle=100){
 #'
 #' @param founderPop a \code{\link{Pop-class}}
 #' @param id a vector of unique identifiers for individuals
-#' in the pedigree. The values of these IDs are seperate from
+#' in the pedigree. The values of these IDs are separate from
 #' the IDs in the founderPop if matchID=FALSE.
 #' @param mother a vector of identifiers for the mothers
 #' of individuals in the pedigree. Must match one of the
@@ -949,17 +1119,17 @@ pedigreeCross = function(founderPop, id, mother, father, matchID=FALSE,
   if(is.null(simParam)){
     simParam = get("SP",envir=.GlobalEnv)
   }
-  
+
   if(is.null(nThreads)){
     nThreads = simParam$nThreads
   }else{
     nThreads = as.integer(nThreads)
   }
-  
+
   if(simParam$sexes!="no"){
     stop("pedigreeCross currently only works with sex='no'")
   }
-  
+
   # Coerce input data
   id = as.character(id)
   mother = as.character(mother)
@@ -972,21 +1142,21 @@ pedigreeCross = function(founderPop, id, mother, father, matchID=FALSE,
   if(is.null(nSelf)){
     nSelf = rep(0, length(id))
   }
-  
+
   # Check input data
   stopifnot(!any(duplicated(id)),
             length(id)==length(mother),
             length(id)==length(father),
             length(id)==length(DH),
             length(id)==length(nSelf))
-  
+
   # Sort pedigree (identifies potential problems)
   ped = sortPed(id=id, mother=mother, father=father,
                 maxCycle=maxCycle)
-  
+
   # Create list for new population
   output = vector("list", length=length(id))
-  
+
   # Order and assign founders
   isFounder = is.na(ped$father) & is.na(ped$mother)
   motherIsFounder = is.na(ped$mother) & !is.na(ped$father)
@@ -1006,17 +1176,17 @@ pedigreeCross = function(founderPop, id, mother, father, matchID=FALSE,
     if(nFounder>founderPop@nInd){
       stop(paste("Pedigree requires",nFounder,"founders, but only",founderPop@nInd,"were supplied"))
     }
-    
+
     # Randomly assign individuals as founders
     founderPop = founderPop[sample.int(founderPop@nInd,nFounder)]
-    
+
     # isFounder
     n1 = 1
     n2 = sum(isFounder)
     founderPop@id[n1:n2] = id[isFounder]
     founderPop@mother[n1:n2] = mother[isFounder]
     founderPop@father[n1:n2] = father[isFounder]
-    
+
     # motherIsFounder
     n = sum(motherIsFounder)
     if(n>=1){
@@ -1026,7 +1196,7 @@ pedigreeCross = function(founderPop, id, mother, father, matchID=FALSE,
       founderPop@mother[n1:n2] = rep("0", n2-n1+1)
       founderPop@father[n1:n2] = rep("0", n2-n1+1)
     }
-    
+
     # fatherIsFounder
     n = sum(fatherIsFounder)
     if(n>=1){
@@ -1037,7 +1207,7 @@ pedigreeCross = function(founderPop, id, mother, father, matchID=FALSE,
       founderPop@father[n1:n2] = rep("0", n2-n1+1)
     }
   }
-  
+
   # Create individuals
   crossPlan = matrix(c(1,1),ncol=2)
   for(gen in seq_len(max(ped$gen))){
@@ -1069,14 +1239,14 @@ pedigreeCross = function(founderPop, id, mother, father, matchID=FALSE,
                                    nThreads=nThreads)
         }
       }
-      
+
       # Self?
       for(j in seq_len(nSelf[i])){
         output[[i]] = self(output[[i]],
                            simParam=simParam,
                            nThreads=nThreads)
       }
-      
+
       # Make the individual a DH?
       if(DH[i]){
         output[[i]] = makeDH(output[[i]],
@@ -1086,14 +1256,14 @@ pedigreeCross = function(founderPop, id, mother, father, matchID=FALSE,
       }
     }
   }
-  
+
   # Collapse list to a population
   output = mergePops(output)
-  
+
   # Copy over names
   output@id = id
   output@mother = mother
   output@father = father
-  
+
   return(output)
 }
