@@ -94,7 +94,7 @@ newMapPop = function(genMap, haplotypes, inbred=FALSE,
 #' @title Create founder haplotypes using MaCS
 #'
 #' @description Uses the MaCS software to produce founder haplotypes
-#' \insertCite{MaCS}{AlphaSimR}.
+#' \insertCite{chen2009Fast}{AlphaSimR}.
 #'
 #' @param nInd number of individuals to simulate
 #' @param nChr number of chromosomes to simulate
@@ -107,23 +107,23 @@ newMapPop = function(genMap, haplotypes, inbred=FALSE,
 #' @param manualCommand user provided MaCS options. For advanced users only.
 #' @param manualGenLen user provided genetic length. This must be supplied if using
 #' manualCommand. If not using manualCommand, this value will replace the predefined
-#' genetic length for the species. However, this the genetic length is only used by
+#' genetic length for the species. However, this genetic length is only used by
 #' AlphaSimR and is not passed to MaCS, so MaCS still uses the predefined genetic length.
 #' For advanced users only.
 #' @param nThreads if OpenMP is available, this will allow for simulating chromosomes in parallel.
 #' If the value is NULL, the number of threads is automatically detected.
 #'
 #' @details
-#' There are currently three species histories available: GENERIC, CATTLE, WHEAT, and MAIZE.
+#' There are currently four species histories available: GENERIC, CATTLE, WHEAT, and MAIZE.
 #'
 #' The GENERIC history is meant to be a reasonable all-purpose choice. It runs quickly and
-#' models a population with an effective populations size that has gone through several historic
+#' models a population with an effective population size that has gone through several historic
 #' bottlenecks. This species history is used as the default arguments in the \code{\link{runMacs2}}
 #' function, so the user should examine this function for the details of how the species is modeled.
 #'
-#' The CATTLE history is based off of real genome sequence data \insertCite{cattle}{AlphaSimR}.
+#' The CATTLE history is based off of real genome sequence data \insertCite{macleod2013Inferring}{AlphaSimR}.
 #'
-#' The WHEAT \insertCite{gaynor_2017}{AlphaSimR} and MAIZE \insertCite{hickey_2014}{AlphaSimR}
+#' The WHEAT \insertCite{gaynor2017Two}{AlphaSimR} and MAIZE \insertCite{hickey2014Evaluation}{AlphaSimR}
 #' histories have been included due to their use in previous simulations. However, it should
 #' be noted that neither faithfully simulates its respective species. This is apparent by
 #' the low number of segregating sites simulated by each history relative to their real-world
@@ -277,7 +277,7 @@ runMacs = function(nInd,nChr=1, segSites=NULL, inbred=FALSE, species="GENERIC",
 #' @description
 #' A wrapper function for \code{\link{runMacs}}. This wrapper is designed
 #' to provide a more intuitive interface for writing custom commands
-#' in MaCS \insertCite{MaCS}{AlphaSimR}. It effectively automates the creation
+#' in MaCS \insertCite{chen2009Fast}{AlphaSimR}. It effectively automates the creation
 #' of an appropriate line for the manualCommand argument in \code{\link{runMacs}}
 #' using user supplied variables, but only allows for a subset of the functionality
 #' offered by this argument. The default arguments of this function were chosen to match

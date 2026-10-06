@@ -24,7 +24,7 @@ selectCross(
 \item{pop}{an object of \code{\link{Pop-class}}}
 
 \item{nInd}{the number of individuals to select. These individuals
-are selected without regards to sex and it supercedes values
+are selected without regard to sex and it supersedes values
 for nFemale and nMale. Thus if the simulation uses sexes, it is
 likely better to leave this value as NULL and use nFemale and nMale
 instead.}
@@ -70,7 +70,7 @@ Returns an object of \code{\link{Pop-class}}
 This is a wrapper that combines the functionalities of
 \code{\link{randCross}} and \code{\link{selectInd}}. The
 purpose of this wrapper is to combine both selection and
-crossing in one function call that minimized the amount
+crossing in one function call that minimizes the amount
 of intermediate populations created. This reduces RAM usage
 and simplifies code writing. Note that this wrapper does not
 provide the full functionality of either function.
@@ -92,3 +92,25 @@ pop = newPop(founderPop, simParam=SP)
 pop2 = selectCross(pop, nInd=4, nCrosses=8, simParam=SP)
 
 }
+\seealso{
+Other mating functions:
+\code{\link[=hybridCross]{hybridCross()}},
+\code{\link[=makeCross]{makeCross()}},
+\code{\link[=makeCross2]{makeCross2()}},
+\code{\link[=makeDH]{makeDH()}},
+\code{\link[=pedigreeCross]{pedigreeCross()}},
+\code{\link[=randCross]{randCross()}},
+\code{\link[=randCross2]{randCross2()}},
+\code{\link[=selectOP]{selectOP()}},
+\code{\link[=self]{self()}},
+\code{\link[=setPhenoGCA]{setPhenoGCA()}},
+\code{\link[=setPhenoProgTest]{setPhenoProgTest()}}
+
+Other selection functions:
+\code{\link[=selectFam]{selectFam()}},
+\code{\link[=selectInd]{selectInd()}},
+\code{\link[=selectOP]{selectOP()}},
+\code{\link[=selectWithinFam]{selectWithinFam()}}
+}
+\concept{mating functions}
+\concept{selection functions}

@@ -45,9 +45,20 @@ If \code{NULL}, the number is obtained from \code{simParam$nThreads}.}
 traits}
 }
 \description{
-An extention of \code{\link{RRBLUP_GCA}} that adds dominance effects.
+An extension of \code{\link{RRBLUP_GCA}} that adds dominance effects.
 Note that we have not seen any consistent benefit of this model over
 \code{\link{RRBLUP_GCA}}.
+}
+\details{
+The model uses separate maternal and paternal marker dosages from
+the training population.
+The solution can be applied with \code{\link{setEBV}}:
+\code{value="female"} or \code{value="male"} gives parental
+predictions, while \code{value="gv"} predicts total hybrid genetic value.
+These model predictions obviously differ from the observed cross means
+returned by \code{\link{calcGCA}}.
+The dominance terms allow cross-specific deviations,
+but SCA's are not returned.
 }
 \examples{
 #Create founder haplotypes

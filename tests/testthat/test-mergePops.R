@@ -2,6 +2,20 @@
 
 context("mergePops")
 
+test_that("RawPop and MapPop concatenation rejects subclasses to preserve slots", {
+  map = quickHaplo(nInd=3, nChr=1, segSites=10)
+  raw = as(map, "RawPop")
+  named = new("NamedMapPop", map, id=as.character(1:3),
+              mother=rep("0", 3), father=rep("0", 3))
+
+  expect_identical(c(raw[1:2], raw[3], NULL), raw)
+  expect_error(c(raw[1:2], map[3]), "All arguments must be a RawPop", fixed=TRUE)
+  expect_identical(c(map[1:2], map[3], NULL), map)
+  expect_error(c(map[1:2], named[3]), "All arguments must be a MapPop", fixed=TRUE)
+  expect_error(c(raw, 1), "All arguments must be a RawPop", fixed=TRUE)
+  expect_error(c(map, raw), "All arguments must be a MapPop", fixed=TRUE)
+})
+
 test_that("cPop_and_mergePops", {
   founderPop = quickHaplo(nInd=3, nChr=1, segSites=10)
   SP = SimParam$new(founderPop)
@@ -113,13 +127,13 @@ test_that("cMultiPop_mergeMultiPops_and_flattenMultiPop", {
                "Use mergePops() to merge multiple Pop objects", fixed = TRUE)
   # Merging invalid objects throws an error
   expect_error(mergeMultiPops(pop, SP),
-               'all(classes == "Pop") is not TRUE', fixed = TRUE)
+               "All populations must be a Pop", fixed = TRUE)
   expect_error(mergeMultiPops(mp1, SP),
-               'is(y, "MultiPop") is not TRUE', fixed = TRUE)
+               "All arguments must be a Pop or a MultiPop", fixed = TRUE)
   expect_error(mergeMultiPops(pop, SP, mp1),
-               'is(y, "MultiPop") is not TRUE', fixed = TRUE)
+               "All arguments must be a Pop or a MultiPop", fixed = TRUE)
   expect_error(mergeMultiPops(mp1, SP, pop),
-               'is(y, "MultiPop") is not TRUE', fixed = TRUE)
+               "All arguments must be a Pop or a MultiPop", fixed = TRUE)
 
   # Combining a Pop and a MultiPop gives a MultiPop
   expect_identical(c(mp1, pop[6:10]),
